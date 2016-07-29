@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 local ABOUT = {
   NAME          = "L_ZWay",
-  VERSION       = "2016.07.28",
+  VERSION       = "2016.07.29",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2016 AKBooer",
@@ -17,8 +17,8 @@ local http    = require "socket.http"
 local ltn12   = require "ltn12"
 
 local Z         -- the Zway object
-local index     -- bi-directional index device no. <--> altid
-local updater   -- table of updaters indexed by altid
+
+local service_update   -- table of service updaters indexed by altid
 
 ------------------
 
@@ -151,7 +151,6 @@ end
 local S_HaDevice = {
     
     ToggleState = function (d, args) 
-      log "ToggleState"
       local status = getVar ("Status", SID.switch, tonumber(d))
       status = ({['0'] = '1', ['1']= '0'}) [status] or '0'
       local value = on_or_off (status) 
@@ -167,7 +166,6 @@ local S_HaDevice = {
 local S_SwitchPower = {
     
     SetTarget = function (d, args)
-      log "SetTarget"
       local value = on_or_off (args.newTargetValue)
       local altid = luup.devices[d].id
       Z.command (altid, value)
@@ -183,9 +181,10 @@ local S_SwitchPower = {
 local S_Dimming = {
     
     SetLoadLevelTarget = function (d, args)
-      local value = "exact?level=" .. (args.newLoadlevelTarget or '0')
+      local level = tonumber (args.newLoadlevelTarget or '0')
+      local value = "exact?level=" .. level
       local altid = luup.devices[d].id
-      local _,b = Z.command (altid, value)
+      Z.command (altid, value)
     end,
     
     update = function (d, inst)
@@ -200,10 +199,6 @@ local S_Dimming = {
 
 local S_Generic = {
     
-    command = function (d, args)
-      
-    end,
-    
     update = function (d, inst)
       setVar ("CurrentLevel", inst.metrics.level, SID.generic, d)
     end,
@@ -211,10 +206,6 @@ local S_Generic = {
 
 
 local S_Light = {
-    
-    command = function (d, args)
-      
-    end,
     
     update = function (d, inst)
       setVar ("CurrentLevel", inst.metrics.level, SID.light, d)
@@ -224,10 +215,6 @@ local S_Light = {
 
 local S_Humidity = {
     
-    command = function (d, args)
-      
-    end,
-    
     update = function (d, inst)
       setVar ("CurrentLevel", inst.metrics.level, SID.humidity, d)
     end,
@@ -235,10 +222,6 @@ local S_Humidity = {
 
 
 local S_Temperature = {
-    
-    command = function (d, args)
-      
-    end,
     
     update = function (d, inst)
       setVar ("CurrentTemperature", inst.metrics.level, SID.temperature, d)
@@ -268,11 +251,7 @@ local S_Security = {
     end,
   }
 
-local S_Unknown = {
- 
-  unknown = function (d)      -- "catch-all" service
-    luup.log ("unknown" .. (d or '?'))
-  end,
+local S_Unknown = {     -- "catch-all" service
 
   update = update_,
 }
@@ -408,15 +387,31 @@ local function appendZwayDevice (lul_device, handle, name, altid, descr)
   )
 end
 
-
 -- create correct parent/child relationship between instances
-local function syncChildren(devNo, tree)
-  local no_reload = true
-  local index = {}          -- bi-directional index of luup device numbers / altid
-	updater = {}
+local function syncChildren(devNo, devices)
   
   -- ZWayVDev [Node ID]:[Instance ID]:[Command Class ID]:[Scale ID] 
   -- for all top-level devices
+  
+  -- return a device tree, indexed by node number (ie. the top-level devices)
+  local function device_tree (d)
+    local tree = {}     -- indexed by node number
+    local n = 0
+    for _,v in pairs (d) do 
+      local altid = v.id: match "^ZWayVDev_zway_.-([%w%-]+)$"
+      if altid then
+        local node, instance, command_class, other = altid: match "(%d+)%-(%d+)%-(%d+)%-?(.*)"
+        tree[node] = tree[node] or {}
+        tree[node][altid] = v
+        n = n + 1
+      end
+    end
+    return tree
+  end
+  
+  local no_reload = true
+	local updater = {}
+  local tree = device_tree (devices)
 	
   getmetatable(luup.devices[devNo]).__index.handle_children = true       -- ensure we handle Zwave actions
   local handle = luup.chdev.start(devNo);
@@ -434,7 +429,6 @@ local function syncChildren(devNo, tree)
       top_level[dino] = true
       getmetatable(dev).__index.handle_children = true       -- ensure parent handles Zwave actions
       local node = dev.id
-      index[node], index[dino] = dino, node      -- index this device
       local handle = luup.chdev.start(dino);
       
       for altid, instance in pairs (tree[node]) do
@@ -447,41 +441,45 @@ local function syncChildren(devNo, tree)
       reload = reload or reload2
     end
 	end
-		
+      
+  local function custom_updater (dino, fct) 
+    return function (...) return fct (dino, ...) end
+  end
+    
   -- now go through devices and index them by altid
   for dino, dev in pairs (luup.devices) do
     if top_level[dev.device_num_parent] then
       local altid = dev.id
-      index[altid], index[dino] = dino, altid      -- index this device
+      updater[altid] = custom_updater (dino, updater[altid])    -- create specific updaters for each device service
     end
   end
   
   if reload then luup.reload () end
-  return index
+  return updater
 end
 
 
 -----------------------------------------
 --
--- DEVICE status updates
+-- DEVICE status updates: ZWay => openLuup
 --
 
-function _G.updateChildren (tree)
-  tree = tree or Z.tree ()
-  
-  for node, instances in pairs(tree) do
-    for altid, instance in pairs (instances) do
-      updater[altid] (index[altid], instance)
+function _G.updateChildren (d)
+  d = d or Z.devices () 
+  for _,instance in pairs (d) do 
+    local altid = instance.id: match "^ZWayVDev_zway_.-([%w%-]+)$"
+    if altid then
+--      local node, instance, command_class, other = altid: match "(%d+)%-(%d+)%-(%d+)%-?(.*)"
+      service_update [altid] (instance)
     end
   end
-
   luup.call_delay ("updateChildren", 2)
 end
 
 
 -----------------------------------------
 --
--- ACTION command callbacks
+-- ACTION command callbacks: openLuup => Zway
 --
 
 local function generic_action (serviceId, action)
@@ -497,6 +495,18 @@ end
 --
 -- Z-WayVDev() API
 --
+
+  --[[
+  
+  ZWayVDev [Node ID]:[Instance ID]:[Command Class ID]:[Scale ID] 
+  
+  The Node Id is the node id of the physical device, 
+  the Instance ID is the instance id of the device or ’0’ if there is only one instance. 
+  The command class ID refers to the command class the function is embedded in. 
+  The scale id is usually ’0’ unless the virtual device is generated from a Z-Wave device 
+  that supports multiple sensors with different scales in one single command class.
+
+  --]]
 
 local function ZWayVDev_API (ip, user, password)
   
@@ -531,50 +541,19 @@ local function ZWayVDev_API (ip, user, password)
     return j
   end
 
-  -- device
-
-  --[[
-  
-  ZWayVDev [Node ID]:[Instance ID]:[Command Class ID]:[Scale ID] 
-  
-  The Node Id is the node id of the physical device, 
-  the Instance ID is the instance id of the device or ’0’ if there is only one instance. 
-  The command class ID refers to the command class the function is embedded in. 
-  The scale id is usually ’0’ unless the virtual device is generated from a Z-Wave device 
-  that supports multiple sensors with different scales in one single command class.
-
-  --]]
-
   local function devices ()
     local url = "http://%s:8083/ZAutomation/api/v1/devices"
     local status, d = HTTP_request (url: format (ip))
     return d and d.data and d.data.devices
-  end
-
-  -- return a device tree, indexed by node number (ie. the top-level devices)
-  local function device_tree (d)
-    d = d or devices ()
-    local tree = {}     -- indexed by node number
-    local n = 0
-    for i,v in pairs (d) do 
-      local altid = v.id: match "^ZWayVDev_zway_.-([%w%-]+)$"
-      if altid then
-        local node, instance, command_class, other = altid: match "(%d+)%-(%d+)%-(%d+)%-?(.*)"
-        tree[node] = tree[node] or {}
-        tree[node][altid] = v
-        n = n + 1
-      end
-    end
-    return tree
   end
   
   -- send a command
   local function command (id, cmd)
     local url = "http://%s:8083/ZAutomation/api/v1/devices/ZWayVDev_zway_%s/command/%s"
     local request = url: format (ip, id, cmd)
-    log (request)
+--    log (request)
     local status, d = HTTP_request (request)
-    log (status)
+--    log (status)
     return status, d
   end
   
@@ -583,7 +562,6 @@ local function ZWayVDev_API (ip, user, password)
     return {
       command = command,
       devices = devices,
-      tree    = device_tree,
     }
   end
 end
@@ -591,7 +569,7 @@ end
 
 -----------------------------------------
 --
--- Z-Way()
+-- Z-Way()  STARTUP
 --
 
 function init(devNo)
@@ -619,9 +597,9 @@ function init(devNo)
     luup.set_failure (0, devNo)	        -- openLuup is UI7 compatible
     status, comment = true, "OK"
   
-    local tree = Z.tree ()
-    index = syncChildren (devNo, tree)
-    _G.updateChildren (tree)
+    local vDevs = Z.devices ()
+    service_update = syncChildren (devNo, vDevs)
+    _G.updateChildren (vDevs)
   
   else
     luup.set_failure (2, devNo)	        -- authorisation failure
