@@ -34,7 +34,8 @@ local SID = {
   security    = "urn:micasaverde-com:serviceId:SecuritySensor1",
   switch      = "urn:upnp-org:serviceId:SwitchPower1",
   temperature = "urn:upnp-org:serviceId:TemperatureSensor1",
-  Zway        = "urn:micasaverde-com:serviceId:ZWaveNetwork1",
+  ZWave       = "urn:micasaverde-com:serviceId:ZWaveNetwork1",
+  ZWay        = "urn:akbooer-com:serviceId:ZWay1",
 }
 
 -- LUUP utility functions 
@@ -151,7 +152,7 @@ end
 local S_HaDevice = {
     
     ToggleState = function (d, args) 
-      local status = getVar ("Status", SID.switch, tonumber(d))
+      local status = getVar ("Status", SID.switch, d)
       status = ({['0'] = '1', ['1']= '0'}) [status] or '0'
       local value = on_or_off (status) 
       local altid = luup.devices[d].id
@@ -233,7 +234,7 @@ local S_Temperature = {
 local S_Security = {
     
     SetArmed = function (d, args)
-      luup.variable_set (SID.security, "Armed", args.newArmedValue or '0', tonumber(d))
+      luup.variable_set (args.serviceId, "Armed", args.newArmedValue or '0', d)
     end,
     
     update = function (d, inst)
@@ -266,7 +267,8 @@ local services = {
     [SID.security]    = S_Security,
     [SID.switch]      = S_SwitchPower,
     [SID.temperature] = S_Temperature,
-    [SID.Zway]        = S_ZWave,
+    [SID.ZWave]       = S_ZWave,
+    [SID.ZWay]        = S_ZWay,
   }
 
 
@@ -469,7 +471,7 @@ function _G.updateChildren (d)
   for _,instance in pairs (d) do 
     local altid = instance.id: match "^ZWayVDev_zway_.-([%w%-]+)$"
     if altid then
---      local node, instance, command_class, other = altid: match "(%d+)%-(%d+)%-(%d+)%-?(.*)"
+--  local node, instance, command_class, scale, char = altid: match "^(%d+)%-(%d+)%-(%d+)%-?(%d*)%-?(%a?)$"
       service_update [altid] (instance)
     end
   end
