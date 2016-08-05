@@ -27,6 +27,7 @@ local devNo
 local ACT = {}
 local DEV = {}
 local SID = {
+    AltUI = "urn:upnp-org:serviceId:altui1",
     ZWave = "urn:micasaverde-com:serviceId:ZWaveNetwork1",
     ZWay  ="urn:akbooer-com:serviceId:ZWay1",
   }
@@ -127,8 +128,16 @@ local command_class = {
       local click = inst.updateTime
 --      setVar ("LastUpdate_" .. meta.altid, click, SID.ZWay, d)
       if click ~= meta.click then -- force variable updates
-        luup.variable_set (SID.controller, "sl_SceneActivated", meta.scale, d)
-        luup.variable_set (SID.controller, "LastSceneTime", os.time(), d)
+        local scene = meta.scale
+        local time  = os.time()
+        local date  = os.date ("%d-%b %H:%M:%S", time): gsub ("^0",'')
+        
+        luup.variable_set (SID.controller, "sl_SceneActivated", scene, d)
+        luup.variable_set (SID.controller, "LastSceneTime",time, d)
+        
+        luup.variable_set (SID.AltUI, "DisplayLine1", "Scene: " .. scene, d)
+        if time then luup.variable_set (SID.AltUI, "DisplayLine2", "Time: "  .. date,  d) end
+        
         meta.click = click
       end
       
@@ -215,6 +224,7 @@ local S_HaDevice = {
       status = ({['0'] = '1', ['1']= '0'}) [status] or '0'
       local value = on_or_off (status) 
       local altid = luup.devices[d].id
+      altid = altid: match "^%d+$" and altid.."-0-37" or altid
       Z.command (altid, value)
     end,
     
@@ -227,6 +237,7 @@ local S_SwitchPower = {
     SetTarget = function (d, args)
       local value = on_or_off (args.newTargetValue)
       local altid = luup.devices[d].id
+      altid = altid: match "^%d+$" and altid.."-0-37" or altid
       Z.command (altid, value)
     end,
     
@@ -240,6 +251,7 @@ local S_Dimming = {
       local level = tonumber (args.newLoadlevelTarget or '0')
       local value = "exact?level=" .. level
       local altid = luup.devices[d].id
+      altid = altid: match "^%d+$" and altid.."-0-38" or altid
       Z.command (altid, value)
     end,
     
