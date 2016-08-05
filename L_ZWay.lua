@@ -2,14 +2,14 @@ module (..., package.seeall)
 
 local ABOUT = {
   NAME          = "L_ZWay",
-  VERSION       = "2016.07.29",
+  VERSION       = "2016.08.05",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2016 AKBooer",
   DOCUMENTATION = "",
 }
 
-local pretty  = require "pretty"
+--local pretty  = require "pretty"
 
 local loader  = require "openLuup.loader"
 local json    = require "openLuup.json"
@@ -24,42 +24,18 @@ local service_update   -- table of service updaters indexed by altid
 
 local devNo
 
-
+local ACT = {}
+local DEV = {}
 local SID = {
-  dimming     = "urn:upnp-org:serviceId:Dimming1",
-  generic     = "urn:micasaverde-com:serviceId:GenericSensor1",
-  hadevice    = "urn:micasaverde-com:serviceId:HaDevice1",
-  humidity    = "urn:micasaverde-com:serviceId:HumiditySensor1",
-  light       = "urn:micasaverde-com:serviceId:LightSensor1",
-  security    = "urn:micasaverde-com:serviceId:SecuritySensor1",
-  switch      = "urn:upnp-org:serviceId:SwitchPower1",
-  temperature = "urn:upnp-org:serviceId:TemperatureSensor1",
-  ZWave       = "urn:micasaverde-com:serviceId:ZWaveNetwork1",
-  ZWay        = "urn:akbooer-com:serviceId:ZWay1",
-}
+    ZWave = "urn:micasaverde-com:serviceId:ZWaveNetwork1",
+    ZWay  ="urn:akbooer-com:serviceId:ZWay1",
+  }
 
 -- LUUP utility functions 
 
 
 local function log(text, level)
 	luup.log(("%s: %s"): format ("ZWay", text), (level or 50))
-end
-
-local function getAttr (name)
-  return luup.attr_get (name, devNo) or ''
-end
-
-local function setAttr (name, value)
-  luup.attr_set (name, value or '', devNo)
-end
-
-local function uiAttr (name, default)
-  local value = getAttr (name)
-  if not value or value == '' then
-    value = default
-    setAttr (value)
-  end
-  return value
 end
 
 local function getVar (name, service, device) 
@@ -103,12 +79,6 @@ local function on_or_off (x)
 end
 
 
-----------------------------------------------------
---
--- SERVICES - virtual services
---
-
-
 --[[
 
 instance = {
@@ -133,7 +103,6 @@ instance = {
     visibility = true
   }
 
-
 vDev commands:
 1. ’update’: updates a sensor value
 2. ’on’: turns a device on. Only valid for binary commands
@@ -142,10 +111,100 @@ vDev commands:
 
 --]]
 
-local function update_ (d, inst)
---  local message = "no update for device %d [%s]"
---  log (message: format (d, inst.id))
+
+----------------------------------------------------
+--
+-- COMMAND CLASSES - virtual device updates
+--
+
+local command_class = {
+  
+  -- catch-all
+  ["0"] = function (d, inst, meta)
+    
+    -- scene controller
+    if inst.deviceType == "toggleButton" then
+      local click = inst.updateTime
+--      setVar ("LastUpdate_" .. meta.altid, click, SID.ZWay, d)
+      if click ~= meta.click then -- force variable updates
+        luup.variable_set (SID.controller, "sl_SceneActivated", meta.scale, d)
+        luup.variable_set (SID.controller, "LastSceneTime", os.time(), d)
+        meta.click = click
+      end
+      
+    else
+      --  local message = "no update for device %d [%s]"
+      --  log (message: format (d, inst.id))
+      --...
+    end
+  end,
+
+  -- binary switch
+  ["37"] = function (d, inst, meta)
+      setVar ("Status",on_or_off (inst.metrics.level), SID.switch, d)
+  end,
+
+  -- multilevel switch
+  ["38"] = function (d, inst, meta, env) 
+    local level = tonumber (inst.metrics.level) or 0
+    setVar ("LoadLevelTarget", level, SID.multilevel, d)
+    setVar ("LoadLevelStatus", level, SID.multilevel, d)
+    local status = (level > 0 and "1") or "0"
+    setVar ("Status", status, SID.switch, d)
+  end,
+  
+  -- binary sensor
+  ["48"] = function (d, inst, meta)
+    local sid = SID.security
+    local tripped = on_or_off (inst.metrics.level)
+    local old = getVar ("Tripped", sid)
+    if tripped ~= old then
+      setVar ("Tripped", tripped, sid, d)
+      setVar ("LastTrip", inst.updateTime, sid, d)
+      local armed = getVar ("Armed", sid, d)
+      if armed == "1" then
+        setVar ("ArmedTripped", tripped, sid, d)
+      end
+    end
+  end,
+
+  -- multilevel sensor
+  ["49"] = function (d, inst, meta)
+    local var = "CurrentLevel"
+    if meta.service == SID.temperature then var = "CurrentTemperature" end
+    setVar (var, inst.metrics.level, meta.service, d)
+  end,
+
+  -- meter
+  ["50"] = function (d, inst, meta)
+    local var = (inst.metrics.scaleTitle or '?'): upper ()
+--    setVar (var, inst.metrics.level, meta.service, d)
+  end,
+  
+  -- battery
+  ["128"] = function (d, inst, meta)
+    setVar ("BatteryLevel", inst.metrics.level, SID.hadevice, d)
+  end,
+
+}
+
+    
+function command_class.new (dino, meta) 
+  local updater = command_class[meta.c_class] or command_class["0"]
+  return function (inst, ...) 
+      setVar (inst.id, inst.metrics.level, SID.ZWay, dino)    -- diagnostic, for the moment
+      -- call with deviceNo, instance object, metadata, and environment variable (for persistent data)
+      return updater (dino, inst, meta, {}, ...) 
+    end
 end
+
+----------------------------------------------------
+--
+-- SERVICES - virtual services
+--
+
+
+local services = {}
 
 
 -- urn:schemas-micasaverde-com:service:HaDevice:1
@@ -159,11 +218,10 @@ local S_HaDevice = {
       Z.command (altid, value)
     end,
     
-    update = update_,
   }
 
 
---  local serviceId = "urn:upnp-org:serviceId:SwitchPower1"
+-- urn:upnp-org:serviceId:SwitchPower1
 local S_SwitchPower = {
     
     SetTarget = function (d, args)
@@ -172,9 +230,6 @@ local S_SwitchPower = {
       Z.command (altid, value)
     end,
     
-    update = function (d, inst)
-      setVar ("Status",on_or_off (inst.metrics.level), SID.switch, d)
-    end,
   }
 
 
@@ -188,46 +243,28 @@ local S_Dimming = {
       Z.command (altid, value)
     end,
     
-    update = function (d, inst)
-      local level = tonumber (inst.metrics.level) or 0
-      setVar ("LoadLevelTarget", level, SID.dimming, d)
-      setVar ("LoadLevelStatus", level, SID.dimming, d)
-      local status = (level > 0 and "1") or "0"
-      setVar ("Status", status, SID.switch, d)
-    end,
   }
 
 
 local S_Generic = {
     
-    update = function (d, inst)
-      setVar ("CurrentLevel", inst.metrics.level, SID.generic, d)
-    end,
   }
 
 
 local S_Light = {
     
-    update = function (d, inst)
-      setVar ("CurrentLevel", inst.metrics.level, SID.light, d)
-    end
   }
 
 
 local S_Humidity = {
     
-    update = function (d, inst)
-      setVar ("CurrentLevel", inst.metrics.level, SID.humidity, d)
-    end,
   }
 
 
 local S_Temperature = {
     
-    update = function (d, inst)
-      setVar ("CurrentTemperature", inst.metrics.level, SID.temperature, d)
-    end,
-  }
+  GetCurrentTemperature = function () end,  -- return value handled by action request mechanism
+   }
 
 
   -- urn:micasaverde-com:serviceId:SecuritySensor1
@@ -237,40 +274,48 @@ local S_Security = {
       luup.variable_set (args.serviceId, "Armed", args.newArmedValue or '0', d)
     end,
     
-    update = function (d, inst)
-      local sid = SID.security
-      local tripped = on_or_off (inst.metrics.level)
-      local old = getVar ("Tripped", sid)
-      if tripped ~= old then
-        setVar ("Tripped", tripped, sid, d)
-        setVar ("LastTrip", inst.updateTime, sid, d)
-        local armed = getVar ("Armed", sid, d)
-        if armed == "1" then
-          setVar ("ArmedTripped", tripped, sid, d)
-        end
-      end
-    end,
   }
+
+local S_Color = {
+
+}
+
+-- urn:micasaverde-com:serviceId:EnergyMetering1
+local S_EnergyMetering = {
+  
+}
+
+local S_SceneController = { 
+
+}
 
 local S_Unknown = {     -- "catch-all" service
 
-  update = update_,
 }
 
 
-local services = {
-    [SID.dimming]     = S_Dimming, 
-    [SID.generic]     = S_Generic,
-    [SID.hadevice]    = S_HaDevice,
-    [SID.humidity]    = S_Humidity,
-    [SID.light]       = S_Light,
-    [SID.security]    = S_Security,
-    [SID.switch]      = S_SwitchPower,
-    [SID.temperature] = S_Temperature,
-    [SID.ZWave]       = S_ZWave,
-    [SID.ZWay]        = S_ZWay,
-  }
+local function vMap (name, sid, dev, act)
+  ACT[name] = act
+  DEV[name] = dev
+  SID[name] = sid
+  if sid and act then services[sid] = act end
+end
+  
 
+vMap ( "multilevel",  "urn:upnp-org:serviceId:Dimming1",                "D_DimmableLight1.xml",     S_Dimming)
+vMap ( "generic",     "urn:micasaverde-com:serviceId:GenericSensor1",   "D_GenericSensor1.xml",     S_Generic)
+vMap ( "hadevice",    "urn:micasaverde-com:serviceId:HaDevice1",        "D_ComboDevice1.xml",       S_HaDevice)        
+vMap ( "humidity",    "urn:micasaverde-com:serviceId:HumiditySensor1",  "D_HumiditySensor1.xml",    S_Humidity)
+vMap ( "luminosity",  "urn:micasaverde-com:serviceId:LightSensor1",     "D_LightSensor1.xml",       S_Light)
+vMap ( "security",    "urn:micasaverde-com:serviceId:SecuritySensor1",  "D_MotionSensor1.xml",      S_Security)
+vMap ( "switch",      "urn:upnp-org:serviceId:SwitchPower1",            "D_BinaryLight1.xml",       S_SwitchPower)
+vMap ( "temperature", "urn:upnp-org:serviceId:TemperatureSensor1",      "D_TemperatureSensor1.xml", S_Temperature)
+vMap ( "switchRGBW",  "urn:micasaverde-com:serviceId:Color1",           "D_DimmableRGBLight1.xml",  S_Color)
+vMap ( "controller",  "urn:schemas-micasaverde-com:service:SceneController:1", "D_SceneController1.xml", S_SceneController)
+vMap ( "thermostat",   nil,                                             "D_HVAC_ZoneThermostat1.xml", S_Unknown)
+vMap ( "battery",     "urn:micasaverde-com:serviceId:HaDevice1",         nil,                       S_HaDevice)
+vMap ( "camera",       nil,                                             "D_DigitalSecurityCamera1.xml")
+vMap ( "combo",        "urn:schemas-micasaverde-com:device:ComboDevice:1", "D_ComboDevice1.xml", S_Unknown)
 
 
 ----------------------------------------------------
@@ -281,6 +326,7 @@ local services = {
 -- ...and from the device file we can then get services...
 -- ...and from the service files, the actions and variables.
 --
+
 
 --[[
 
@@ -297,62 +343,30 @@ All Widgets belong to one specific type. At the moment the following types are d
 – camera: A camera will show the image and can be operated
 – fan: A fan can be turned on and off
 
-
-D_RemoteControl1.xml
-D_DimmableRGBLight1.xml
-
-urn:schemas-micasaverde-com:device:PowerMeter:1
-urn:schemas-upnp-org:device:DimmableRGBLight:1
 --]]
 
-  local WidgetDeviceMap = {
-    toggleButton = {label="Remote Controller",    category = 1,   upnp_file = "D_SceneController1.xml", service=S_Unknown},
-    toggleButton = {label="Static Controller",    category = 1,   upnp_file = "D_SceneController1.xml", service=S_Unknown},
-    thermostat = {label="Thermostat",       category = 5,   upnp_file = "D_HVAC_ZoneThermostat1.xml", service=S_Unknown},
-    [0x09] = {label="Window Covering",      category = 8,   upnp_file = "D_WindowCovering1.xml", service=S_Unknown},
-    switchBinary = {label="Binary Switch",  category = 3,   upnp_file = "D_BinaryLight1.xml", service=S_SwitchPower},
-    switchMultilevel = {label="Multilevel Switch",  category = 2,   upnp_file = "D_DimmableLight1.xml", service=S_Dimming},
-    [0x12] = {label="Remote Switch",        category = 3,   upnp_file = "D_BinaryLight1.xml", service=S_Unknown},
-    [0x13] = {label="Toggle Switch",        category = 3,   upnp_file = "D_BinaryLight1.xml", service=S_Unknown},
-    [0x16] = {label="Ventilation",          category = 5,   upnp_file = "D_HVAC_ZoneThermostat1.xml", service=S_Unknown},
-    sensorBinary = {label="Binary Sensor",  category = 4,   upnp_file = "D_MotionSensor1.xml", service=S_Security},
-    sensorMultilevel = {label="Multilevel Sensor",  category = 12,  upnp_file = "D_GenericSensor1.xml", service=S_Unknown},
-    [0x30] = {label="Pulse Meter",        category = 21,  upnp_file = "D_PowerMeter1.xml", service=S_Unknown},
-    [0x31] = {label="Meter",              category = 21,  upnp_file = "D_PowerMeter1.xml", service=S_Unknown},
-    [0x40] = {label="Entry Control",      category = 7,   upnp_file = "D_DoorLock1.xml", service=S_Unknown},
-    camera = {upnp_file = "D_DigitalSecurityCamera1.xml", device_type="urn:schemas-upnp-org:device:DigitalSecurityCamera:1", service=S_Unknown},
-  }
 
-  local ProbeDeviceMap = {
-    ["generic"]     = {upnp_file="D_GenericSensor1.xml", device_type="urn:schemas-micasaverde-com:device:GenericSensor:1", service=S_Generic},
-    ["luminosity"]  = {upnp_file="D_LightSensor1.xml", device_type="urn:schemas-micasaverde-com:device:LightSensor:1", service=S_Light},
-    ["humidity"]    = {upnp_file="D_HumiditySensor1.xml", device_type="urn:schemas-micasaverde-com:device:HumiditySensor:1", service=S_Humidity},
-    ["temperature"] = {upnp_file="D_TemperatureSensor1.xml", device_type="urn:schemas-micasaverde-com:device:TemperatureSensor:1", service=S_Temperature},
-  }
-  
-----------------------------------------------------
---
--- return a Vera device description
---
+local wMap = {
+  sensorBinary      = "security",
+  sensorMultilevel  = "generic",
+  switchBinary      = "switch",
+  switchMultilevel  = "multilevel",
+  switchRGBW        = "switchRGBW",
+  switchControl     = "switch",
+  toggleButton      = "controller",
+  thermostat        = "thermostat",
+  battery           = "battery",
+  camera            = "camera",
+  fan               = nil,
+}
 
-local function findDeviceDescription (ZWayVDev)	
-	
-  local DFile, devicetype, service 
-  local dtype = ZWayVDev.deviceType
-  local ptype = ZWayVDev.probeType
-  local wtype = ptype or dtype
-  if wtype then
---    print (dtype, ptype, DFile)
-    local map   = ProbeDeviceMap[ptype] or WidgetDeviceMap[dtype] or {}
-    DFile       = map.upnp_file
-    devicetype  = map.device_type
-    service     = map.service
-  end
-  
+
+
+local function parameter_list (DFile)
   local parameters
   if DFile then
     local d = loader.read_device (DFile)          -- read the device file
-    
+--    print (DFile, pretty (d))
     local p = {}
     for _, s in ipairs (d.service_list) do
       if s.SCPDURL then 
@@ -368,91 +382,146 @@ local function findDeviceDescription (ZWayVDev)
     end
     parameters = table.concat (p, '\n')
   end
-  
-  return {
-    devicetype  = devicetype or "urn:schemas-micasaverde-com:device:ComboDevice:1",
-    DFile       = DFile or "D_ComboDevice1.xml",
-    IFile       = '',
-    Parameters  = parameters or '',    -- "service,variable=value\nservice..."
-    service     = service or S_Unknown,
-  }
+  return parameters
 end
 
 
-local function appendZwayDevice (lul_device, handle, name, altid, descr)
+local function index_nodes (d)
+  local index = {}     -- virtual device number indexed by node number
+  for _,v in pairs (d) do 
+    local node = v.id: match "^ZWayVDev_zway_.-(%d+)" 
+    if node then
+      local t = index[node] or {}
+      t[#t+1] = v
+      index[node] = t
+    end
+  end
+  return index
+end
+
+--[[
+
+ZWayVDev [Node ID]:[Instance ID]:[Command Class ID]:[Scale ID] 
+
+The Node Id is the node id of the physical device, 
+the Instance ID is the instance id of the device or ’0’ if there is only one instance. 
+The command class ID refers to the command class the function is embedded in. 
+The scale id is usually ’0’ unless the virtual device is generated from a Z-Wave device 
+that supports multiple sensors with different scales in one single command class.
+
+--]]
+
+local function analyze (devices)  
+  local tree = index_nodes (devices)
+  for _,instances in pairs (tree) do
+    for _, v in ipairs (instances) do
+      local altid = v.id: match "([%-%w]+)$"
+      local node, instance, c_class, scale, char = altid: match "^(%d+)%-(%d+)%-(%d+)%-?(%d*)%-?(%a?)$"
+      local ptype = v.probeType
+      local dtype = wMap[v.deviceType]
+      v.meta = {
+        child     = instance ~= "0" or (scale ~= '' and DEV [v.probeType]),
+        device    = DEV[ptype] or DEV[dtype] or DEV.generic,
+        service   = SID[ptype] or SID[dtype] or SID.generic,
+--        update    = (ACT[ptype] or ACT[dtype] or S_Unknown).update,
+        label     = ptype ~= '' and ptype or dtype,
+        altid     = altid,
+        node      = node,
+        instance  = instance,
+        c_class   = c_class,
+        scale     = scale,
+        char      = char,
+      }
+    end
+  end
+  return tree
+end
+
+-- given all the instances of a node, determine the Vera device type
+local function node_type (instances)
+  local svcSet = {}
+  
+  local function singleton () return #instances == 1 and instances[1].meta.device end
+  local function controller() return svcSet[SID.controller] and DEV.controller end
+  local function dimmer() local n = svcSet[SID.multilevel] return n and (n >= 3 and DEV.switchRGBW or DEV.multilevel) end
+  local function security() return svcSet[SID.security] and DEV.security end
+  local function combo() return DEV.combo end    -- it's a mess
+  
+  for _, v in ipairs (instances) do
+    svcSet[v.meta.service] = (svcSet[v.meta.service] or 0) + 1
+  end
+  
+  return singleton() or controller() or dimmer() or security() or combo()
+end
+
+
+local function appendZwayDevice (lul_device, handle, name, altid, upnp_file, params)
   luup.chdev.append (
-    lul_device, handle, 	      -- parent device and handle
-    altid , name, 				      -- id and description
-    descr.devicetype, 		      -- device type
-    descr.DFile, descr.IFile,   -- device filename and implementation filename
-    descr.Parameters  				  -- parameters: "service,variable=value\nservice..."
+    lul_device, handle,   -- parent device and handle
+    altid , name, 				 -- id and description
+    nil,                  -- device type
+    upnp_file, nil,       -- device filename and implementation filename
+    params  				       -- parameters: "service,variable=value\nservice..."
   )
 end
+
 
 -- create correct parent/child relationship between instances
 local function syncChildren(devNo, devices)
   
   -- ZWayVDev [Node ID]:[Instance ID]:[Command Class ID]:[Scale ID] 
   -- for all top-level devices
-  
-  -- return a device tree, indexed by node number (ie. the top-level devices)
-  local function device_tree (d)
-    local tree = {}     -- indexed by node number
-    local n = 0
-    for _,v in pairs (d) do 
-      local altid = v.id: match "^ZWayVDev_zway_.-([%w%-]+)$"
-      if altid then
-        local node, instance, command_class, other = altid: match "(%d+)%-(%d+)%-(%d+)%-?(.*)"
-        tree[node] = tree[node] or {}
-        tree[node][altid] = v
-        n = n + 1
-      end
-    end
-    return tree
-  end
+
   
   local no_reload = true
 	local updater = {}
-  local tree = device_tree (devices)
+  local tree = analyze (devices)
 	
   getmetatable(luup.devices[devNo]).__index.handle_children = true       -- ensure we handle Zwave actions
+  
+  -- first the top-level node devices...
+    
   local handle = luup.chdev.start(devNo);
-	for node in pairs(tree) do
-    local name = "ZWayVDev_" .. node
-    appendZwayDevice (devNo, handle, name, node, findDeviceDescription {})
+	for node, instances in pairs(tree) do
+    local name = (instances[1].metrics.title: match "%w+") .. '_' .. node
+    local DFile = node_type(instances)
+    local parameters = parameter_list (DFile)
+    appendZwayDevice (devNo, handle, name, node, DFile, parameters)
 	end
 	local reload = luup.chdev.sync(devNo, handle, no_reload)   -- sync all the top-level devices
 
-  -- ...and the child instances  
+  -- ...and then the child instances or additional device variables
   
 	local top_level = {}
   for dino, dev in pairs(luup.devices) do
     if dev.device_num_parent == devNo then
       top_level[dino] = true
-      getmetatable(dev).__index.handle_children = true       -- ensure parent handles Zwave actions
       local node = dev.id
       local handle = luup.chdev.start(dino);
       
-      for altid, instance in pairs (tree[node]) do
-        local name = altid
-        local vDev = findDeviceDescription (instance)
-        updater[altid] = vDev.service.update
-        appendZwayDevice (dino, handle, name, altid, vDev)
+      getmetatable(dev).__index.handle_children = true       -- ensure parent handles Zwave actions
+ 
+      for _, instance in pairs (tree[node]) do
+        local m = instance.meta
+        if m.child then
+          local name = (instance.metrics.title: match "%w+") .. '_' ..  m.altid
+          updater[m.altid] = m
+          appendZwayDevice (dino, handle, name, m.altid, m.device)
+        else
+          local name = m.label .. '_' .. m.altid         -- add variable
+          updater[m.altid] = command_class.new (dino, m)    -- create specific updaters for each device variable
+        end
       end
       local reload2 = luup.chdev.sync(dino, handle, no_reload)   -- sync the lower-level devices for this top-level one
       reload = reload or reload2
     end
 	end
-      
-  local function custom_updater (dino, fct) 
-    return function (...) return fct (dino, ...) end
-  end
     
-  -- now go through devices and index them by altid
+  -- now go through devices and create custom updaters for the individual child devices
   for dino, dev in pairs (luup.devices) do
     if top_level[dev.device_num_parent] then
       local altid = dev.id
-      updater[altid] = custom_updater (dino, updater[altid])    -- create specific updaters for each device service
+      updater[altid] = command_class.new (dino, updater[altid])    -- create specific updaters for each device service
     end
   end
   
@@ -490,25 +559,14 @@ local function generic_action (serviceId, action)
     log (message: format (lul_device, serviceId, action))
     return false
   end 
-  return { run = (services[serviceId] or {}) [action] or noop  }
+  local service = services[serviceId] or {}
+  return { run = service [action] or noop }
 end
 
 -----------------------------------------
 --
 -- Z-WayVDev() API
 --
-
-  --[[
-  
-  ZWayVDev [Node ID]:[Instance ID]:[Command Class ID]:[Scale ID] 
-  
-  The Node Id is the node id of the physical device, 
-  the Instance ID is the instance id of the device or ’0’ if there is only one instance. 
-  The command class ID refers to the command class the function is embedded in. 
-  The scale id is usually ’0’ unless the virtual device is generated from a Z-Wave device 
-  that supports multiple sensors with different scales in one single command class.
-
-  --]]
 
 local function ZWayVDev_API (ip, user, password)
   
@@ -527,8 +585,12 @@ local function ZWayVDev_API (ip, user, password)
       source = body and ltn12.source.string(body),
       sink = ltn12.sink.table(response_body)
     }
-    local j = table.concat (response_body)
-    return status, json.decode (j)
+    local json_response = table.concat (response_body)
+    if status ~= 200 then 
+      log (url)
+      log (json_response)
+    end
+    return status, json.decode (json_response)
   end
 
   local function authenticate ()
@@ -553,10 +615,7 @@ local function ZWayVDev_API (ip, user, password)
   local function command (id, cmd)
     local url = "http://%s:8083/ZAutomation/api/v1/devices/ZWayVDev_zway_%s/command/%s"
     local request = url: format (ip, id, cmd)
---    log (request)
-    local status, d = HTTP_request (request)
---    log (status)
-    return status, d
+    return HTTP_request (request)
   end
   
   -- ZWayVDev()
@@ -589,10 +648,10 @@ function init(devNo)
 
 	luup.devices[devNo].action_callback (generic_action)     -- catch all undefined action calls  
 	
-	local user      = uiAttr ("username", "admin")
-	local password  = uiAttr ("password", "razberry")
+	local user     = uiVar ("Username", "admin")
+	local password = uiVar ("Password", "razberry")
   
-  Z = ZWayVDev_API (ip ,user,password)
+  Z = ZWayVDev_API (ip, user, password)
 
   local status, comment     
   if Z then
