@@ -9,12 +9,14 @@ local ABOUT = {
   DOCUMENTATION = "",
 }
 
+
 --local pretty  = require "pretty"
 
 local loader  = require "openLuup.loader"
 local json    = require "openLuup.json"
 local http    = require "socket.http"
 local ltn12   = require "ltn12"
+
 
 local Z         -- the Zway object
 
@@ -27,9 +29,10 @@ local devNo
 local ACT = {}
 local DEV = {}
 local SID = {
-    AltUI = "urn:upnp-org:serviceId:altui1",
-    ZWave = "urn:micasaverde-com:serviceId:ZWaveNetwork1",
-    ZWay  ="urn:akbooer-com:serviceId:ZWay1",
+    AltUI   = "urn:upnp-org:serviceId:altui1",
+    Energy  = "urn:micasaverde-com:serviceId:EnergyMetering1",
+    ZWave   = "urn:micasaverde-com:serviceId:ZWaveNetwork1",
+    ZWay    = "urn:akbooer-com:serviceId:ZWay1",
   }
 
 -- LUUP utility functions 
@@ -129,8 +132,8 @@ local command_class = {
 --      setVar ("LastUpdate_" .. meta.altid, click, SID.ZWay, d)
       if click ~= meta.click then -- force variable updates
         local scene = meta.scale
-        local time  = os.time()
-        local date  = os.date ("%d-%b %H:%M:%S", time): gsub ("^0",'')
+        local time  = os.time()     -- "◷" == json.decode [["\u25F7"]]
+        local date  = os.date ("◷ %Y-%m-%d %H:%M:%S", time): gsub ("^0",'')
         
         luup.variable_set (SID.controller, "sl_SceneActivated", scene, d)
         luup.variable_set (SID.controller, "LastSceneTime",time, d)
@@ -179,15 +182,18 @@ local command_class = {
 
   -- multilevel sensor
   ["49"] = function (d, inst, meta)
-    local var = "CurrentLevel"
-    if meta.service == SID.temperature then var = "CurrentTemperature" end
+    local name = {
+      [SID.temperature] = "CurrentTemperature",
+      [SID.energy] = "Watts",
+    }
+    local var = name[meta.service] or "CurrentLevel"
     setVar (var, inst.metrics.level, meta.service, d)
   end,
 
   -- meter
   ["50"] = function (d, inst, meta)
     local var = (inst.metrics.scaleTitle or '?'): upper ()
---    setVar (var, inst.metrics.level, meta.service, d)
+    if var then setVar (var, inst.metrics.level, SID.Energy, d) end
   end,
   
   -- battery
@@ -291,6 +297,17 @@ local S_Security = {
 
 local S_Color = {
 
+  SetColorRGB = function (d, args)
+    local current = getVar ("CurrentColor", SID.switchRGBW, d)
+    log (json.encode {
+        newColorRGBTarget = args.newColorRGBTarget,
+        serviceId = args.serviceId,
+        switchRBG = SID.switchRGBW,
+        device = d,
+        CurrentColor = current,
+        })
+  end,
+  
 }
 
 -- urn:micasaverde-com:serviceId:EnergyMetering1
@@ -327,8 +344,9 @@ vMap ( "switchRGBW",  "urn:micasaverde-com:serviceId:Color1",           "D_Dimma
 vMap ( "controller",  "urn:schemas-micasaverde-com:service:SceneController:1", "D_SceneController1.xml", S_SceneController)
 vMap ( "thermostat",   nil,                                             "D_HVAC_ZoneThermostat1.xml", S_Unknown)
 vMap ( "battery",     "urn:micasaverde-com:serviceId:HaDevice1",         nil,                       S_HaDevice)
-vMap ( "camera",       nil,                                             "D_DigitalSecurityCamera1.xml")
-vMap ( "combo",        "urn:schemas-micasaverde-com:device:ComboDevice:1", "D_ComboDevice1.xml", S_Unknown)
+vMap ( "camera",       nil,                                             "D_DigitalSecurityCamera1.xml", nil)
+vMap ( "combo",        "urn:schemas-micasaverde-com:device:ComboDevice:1", "D_ComboDevice1.xml",    S_Unknown)
+vMap ( "energy",       "urn:micasaverde-com:serviceId:EnergyMetering1",  nil,       S_EnergyMetering)
 
 
 ----------------------------------------------------
@@ -429,7 +447,8 @@ local function analyze (devices)
   for _,instances in pairs (tree) do
     for _, v in ipairs (instances) do
       local altid = v.id: match "([%-%w]+)$"
-      local node, instance, c_class, scale, char = altid: match "^(%d+)%-(%d+)%-(%d+)%-?(%d*)%-?(%a?)$"
+--      local node, instance, c_class, scale, char = altid: match "^(%d+)%-(%d+)%-(%d+)%-?(%d*)%-?(%a?)$"
+      local node, instance, c_class, scale, char = altid: match "^(%d+)%-(%d+)%-(%d+)%-?(%d*)(.*)"
       local ptype = v.probeType
       local dtype = wMap[v.deviceType]
       v.meta = {
@@ -468,13 +487,14 @@ local function node_type (instances)
 end
 
 
-local function appendZwayDevice (lul_device, handle, name, altid, upnp_file, params)
+local function appendZwayDevice (lul_device, handle, name, altid, upnp_file)
+  local parameters = parameter_list (upnp_file)
   luup.chdev.append (
     lul_device, handle,   -- parent device and handle
-    altid , name, 				 -- id and description
+    altid, name, 				  -- id and description
     nil,                  -- device type
     upnp_file, nil,       -- device filename and implementation filename
-    params  				       -- parameters: "service,variable=value\nservice..."
+    parameters  				   -- parameters: "service,variable=value\nservice..."
   )
 end
 
@@ -498,8 +518,7 @@ local function syncChildren(devNo, devices)
 	for node, instances in pairs(tree) do
     local name = (instances[1].metrics.title: match "%w+") .. '_' .. node
     local DFile = node_type(instances)
-    local parameters = parameter_list (DFile)
-    appendZwayDevice (devNo, handle, name, node, DFile, parameters)
+    appendZwayDevice (devNo, handle, name, node, DFile)
 	end
 	local reload = luup.chdev.sync(devNo, handle, no_reload)   -- sync all the top-level devices
 
@@ -553,7 +572,6 @@ function _G.updateChildren (d)
   for _,instance in pairs (d) do 
     local altid = instance.id: match "^ZWayVDev_zway_.-([%w%-]+)$"
     if altid then
---  local node, instance, command_class, scale, char = altid: match "^(%d+)%-(%d+)%-(%d+)%-?(%d*)%-?(%a?)$"
       service_update [altid] (instance)
     end
   end
@@ -620,7 +638,7 @@ local function ZWayVDev_API (ip, user, password)
 
   local function devices ()
     local url = "http://%s:8083/ZAutomation/api/v1/devices"
-    local status, d = HTTP_request (url: format (ip))
+    local status, d = HTTP_request (url: format (ip))    
     return d and d.data and d.data.devices
   end
   
