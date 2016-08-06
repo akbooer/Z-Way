@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 local ABOUT = {
   NAME          = "L_ZWay",
-  VERSION       = "2016.08.05",
+  VERSION       = "2016.08.06",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2016 AKBooer",
@@ -135,8 +135,8 @@ local command_class = {
         luup.variable_set (SID.controller, "sl_SceneActivated", scene, d)
         luup.variable_set (SID.controller, "LastSceneTime",time, d)
         
-        luup.variable_set (SID.AltUI, "DisplayLine1", "Scene: " .. scene, d)
-        if time then luup.variable_set (SID.AltUI, "DisplayLine2", "Time: "  .. date,  d) end
+        if time then luup.variable_set (SID.AltUI, "DisplayLine1", date,  d) end
+        luup.variable_set (SID.AltUI, "DisplayLine2", "Scene: " .. scene, d)
         
         meta.click = click
       end
@@ -154,7 +154,7 @@ local command_class = {
   end,
 
   -- multilevel switch
-  ["38"] = function (d, inst, meta, env) 
+  ["38"] = function (d, inst, meta) 
     local level = tonumber (inst.metrics.level) or 0
     setVar ("LoadLevelTarget", level, SID.multilevel, d)
     setVar ("LoadLevelStatus", level, SID.multilevel, d)
@@ -197,13 +197,14 @@ local command_class = {
 
 }
 
+command_class["113"] = command_class["48"]      -- alarm
     
 function command_class.new (dino, meta) 
   local updater = command_class[meta.c_class] or command_class["0"]
   return function (inst, ...) 
       setVar (inst.id, inst.metrics.level, SID.ZWay, dino)    -- diagnostic, for the moment
-      -- call with deviceNo, instance object, metadata, and environment variable (for persistent data)
-      return updater (dino, inst, meta, {}, ...) 
+      -- call with deviceNo, instance object, and metadata (for persistent data)
+      return updater (dino, inst, meta, ...) 
     end
 end
 
