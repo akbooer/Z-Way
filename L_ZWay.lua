@@ -341,13 +341,57 @@ vMap ( "security",    "urn:micasaverde-com:serviceId:SecuritySensor1",  "D_Motio
 vMap ( "switch",      "urn:upnp-org:serviceId:SwitchPower1",            "D_BinaryLight1.xml",       S_SwitchPower)
 vMap ( "temperature", "urn:upnp-org:serviceId:TemperatureSensor1",      "D_TemperatureSensor1.xml", S_Temperature)
 vMap ( "switchRGBW",  "urn:micasaverde-com:serviceId:Color1",           "D_DimmableRGBLight1.xml",  S_Color)
-vMap ( "controller",  "urn:schemas-micasaverde-com:service:SceneController:1", "D_SceneController1.xml", S_SceneController)
+vMap ( "controller",  "urn:micasaverde-com:serviceId:SceneController1", "D_SceneController1.xml",   S_SceneController)
 vMap ( "thermostat",   nil,                                             "D_HVAC_ZoneThermostat1.xml", S_Unknown)
 vMap ( "battery",     "urn:micasaverde-com:serviceId:HaDevice1",         nil,                       S_HaDevice)
 vMap ( "camera",       nil,                                             "D_DigitalSecurityCamera1.xml", nil)
 vMap ( "combo",        "urn:schemas-micasaverde-com:device:ComboDevice:1", "D_ComboDevice1.xml",    S_Unknown)
 vMap ( "energy",       "urn:micasaverde-com:serviceId:EnergyMetering1",  nil,       S_EnergyMetering)
 
+--[[
+
+PROBE Types:
+  'switchColor_rgb'
+  'switchColor_soft_white'
+  'switchColor_cold_white'
+  'switchColor_red'
+  'switchColor_green'
+  'switchColor_blue'
+  'general_purpose'
+              
+  'meterElectric_kilowatt_hour'
+  'meterElectric_watt'
+  'meterElectric_pulse_count'
+  'meterElectric_voltage'
+  'meterElectric_ampere'
+  'meterElectric_power_factor'
+                  
+  'thermostat_mode'
+  'thermostat_set_point'
+                  
+  'alarmSensor_general_purpose'
+  'alarmSensor_smoke'
+  'alarmSensor_co'
+  'alarmSensor_coo'
+  'alarmSensor_heat'
+  'alarmSensor_flood'
+  'alarmSensor_door'
+  'alarmSensor_burglar'
+  'alarmSensor_power'
+  'alarmSensor_system'
+  'alarmSensor_emergency'
+  'alarmSensor_clock'
+  'alarm_door'
+                  
+  'alarm_coo'
+  'alarm_heat'
+  'alarm_burglar'
+  'alarm_power'
+  'alarm_system'
+  'alarm_emergency'
+  'alarm_clock'
+[
+--]]
 
 ----------------------------------------------------
 
@@ -399,16 +443,21 @@ local function parameter_list (DFile)
     local d = loader.read_device (DFile)          -- read the device file
 --    print (DFile, pretty (d))
     local p = {}
+    local parameter = "%s,%s=%s"
     for _, s in ipairs (d.service_list or {}) do
       if s.SCPDURL then 
         local svc = loader.read_service (s.SCPDURL)   -- read the service file(s)
-        local parameter = "%s,%s=%s"
         for _,v in ipairs (svc.variables or {}) do
           local default = v.defaultValue
           if default and default ~= '' then            -- only variables with defaults
             p[#p+1] = parameter: format (s.serviceId, v.name, default)
           end
         end
+      end
+      if s.serviceId == SID.controller then
+        local txt = [[Define scene triggers to watch sl_SceneActivated]] ..
+                    [[ with Lua Expression: new == "button_number"]]
+        p[#p+1] = parameter: format (s.serviceId, "Scenes", txt) 
       end
     end
     parameters = table.concat (p, '\n')
