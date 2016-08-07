@@ -399,7 +399,7 @@ local function parameter_list (DFile)
     local d = loader.read_device (DFile)          -- read the device file
 --    print (DFile, pretty (d))
     local p = {}
-    for _, s in ipairs (d.service_list) do
+    for _, s in ipairs (d.service_list or {}) do
       if s.SCPDURL then 
         local svc = loader.read_service (s.SCPDURL)   -- read the service file(s)
         local parameter = "%s,%s=%s"
