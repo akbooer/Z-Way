@@ -298,13 +298,13 @@ local S_Security = {
 local S_Color = {
 
   SetColorRGB = function (d, args)
-     -- args.newColorRGBTarget = "61,163,69"
-
+    local current = getVar ("CurrentColor", SID.switchRGBW, d)
     log (json.encode {
         newColorRGBTarget = args.newColorRGBTarget,
         serviceId = args.serviceId,
         switchRBG = SID.switchRGBW,
         device = d,
+        CurrentColor = current,
         })
   end,
   
@@ -532,8 +532,7 @@ local function node_type (instances)
     svcSet[v.meta.service] = (svcSet[v.meta.service] or 0) + 1
   end
   
---  return singleton() or controller() or dimmer() or security() or combo()
-  return singleton() or controller() or security() or dimmer () or combo()
+  return singleton() or controller() or dimmer() or security() or combo()
 end
 
 
