@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 local ABOUT = {
   NAME          = "L_ZWay",
-  VERSION       = "2016.08.06",
+  VERSION       = "2016.08.07",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2016 AKBooer",
@@ -447,8 +447,7 @@ local function analyze (devices)
   for _,instances in pairs (tree) do
     for _, v in ipairs (instances) do
       local altid = v.id: match "([%-%w]+)$"
---      local node, instance, c_class, scale, char = altid: match "^(%d+)%-(%d+)%-(%d+)%-?(%d*)%-?(%a?)$"
-      local node, instance, c_class, scale, char = altid: match "^(%d+)%-(%d+)%-(%d+)%-?(%d*)(.*)"
+      local node, instance, c_class, scale, other, char = altid: match "^(%d+)%-(%d+)%-(%d+)%-?(%d*)%-?(.-)%-?(%a*)$"
       local ptype = v.probeType
       local dtype = wMap[v.deviceType]
       v.meta = {
@@ -462,6 +461,7 @@ local function analyze (devices)
         instance  = instance,
         c_class   = c_class,
         scale     = scale,
+        other     = other,
         char      = char,
       }
     end
@@ -569,6 +569,8 @@ end
 
 function _G.updateChildren (d)
   d = d or Z.devices () 
+--  setVar ("DisplayLine1", #d.." devices, " .. Nscn .. " scenes", SID.altui)
+  setVar ("DisplayLine1", #(d or {}).." vDevs", SID.AltUI)
   for _,instance in pairs (d) do 
     local altid = instance.id: match "^ZWayVDev_zway_.-([%w%-]+)$"
     if altid then
@@ -683,6 +685,8 @@ function init(devNo)
 	local password = uiVar ("Password", "razberry")
   
   Z = ZWayVDev_API (ip, user, password)
+
+  setVar ("DisplayLine2", ip, SID.AltUI)
 
   local status, comment     
   if Z then
