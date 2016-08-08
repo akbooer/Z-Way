@@ -298,13 +298,13 @@ local S_Security = {
 local S_Color = {
 
   SetColorRGB = function (d, args)
-    local current = getVar ("CurrentColor", SID.switchRGBW, d)
+     -- args.newColorRGBTarget = "61,163,69"
+
     log (json.encode {
         newColorRGBTarget = args.newColorRGBTarget,
         serviceId = args.serviceId,
         switchRBG = SID.switchRGBW,
         device = d,
-        CurrentColor = current,
         })
   end,
   
@@ -324,7 +324,7 @@ local S_Unknown = {     -- "catch-all" service
 }
 
 
-local function vMap (name, sid, dev, act)
+local function vMap (name, cc, sid, dev, act)
   ACT[name] = act
   DEV[name] = dev
   SID[name] = sid
@@ -332,21 +332,22 @@ local function vMap (name, sid, dev, act)
 end
   
 
-vMap ( "multilevel",  "urn:upnp-org:serviceId:Dimming1",                "D_DimmableLight1.xml",     S_Dimming)
-vMap ( "generic",     "urn:micasaverde-com:serviceId:GenericSensor1",   "D_GenericSensor1.xml",     S_Generic)
-vMap ( "hadevice",    "urn:micasaverde-com:serviceId:HaDevice1",        "D_ComboDevice1.xml",       S_HaDevice)        
-vMap ( "humidity",    "urn:micasaverde-com:serviceId:HumiditySensor1",  "D_HumiditySensor1.xml",    S_Humidity)
-vMap ( "luminosity",  "urn:micasaverde-com:serviceId:LightSensor1",     "D_LightSensor1.xml",       S_Light)
-vMap ( "security",    "urn:micasaverde-com:serviceId:SecuritySensor1",  "D_MotionSensor1.xml",      S_Security)
-vMap ( "switch",      "urn:upnp-org:serviceId:SwitchPower1",            "D_BinaryLight1.xml",       S_SwitchPower)
-vMap ( "temperature", "urn:upnp-org:serviceId:TemperatureSensor1",      "D_TemperatureSensor1.xml", S_Temperature)
-vMap ( "switchRGBW",  "urn:micasaverde-com:serviceId:Color1",           "D_DimmableRGBLight1.xml",  S_Color)
-vMap ( "controller",  "urn:micasaverde-com:serviceId:SceneController1", "D_SceneController1.xml",   S_SceneController)
-vMap ( "thermostat",   nil,                                             "D_HVAC_ZoneThermostat1.xml", S_Unknown)
-vMap ( "battery",     "urn:micasaverde-com:serviceId:HaDevice1",         nil,                       S_HaDevice)
-vMap ( "camera",       nil,                                             "D_DigitalSecurityCamera1.xml", nil)
-vMap ( "combo",        "urn:schemas-micasaverde-com:device:ComboDevice:1", "D_ComboDevice1.xml",    S_Unknown)
-vMap ( "energy",       "urn:micasaverde-com:serviceId:EnergyMetering1",  nil,       S_EnergyMetering)
+vMap ( "multilevel",   38, "urn:upnp-org:serviceId:Dimming1",                "D_DimmableLight1.xml",     S_Dimming)
+vMap ( "generic",      49, "urn:micasaverde-com:serviceId:GenericSensor1",   nil,     S_Generic)
+vMap ( "hadevice",      0, "urn:micasaverde-com:serviceId:HaDevice1",        "D_ComboDevice1.xml",       S_HaDevice)        
+vMap ( "humidity",     49, "urn:micasaverde-com:serviceId:HumiditySensor1",  "D_HumiditySensor1.xml",    S_Humidity)
+vMap ( "luminosity",   49, "urn:micasaverde-com:serviceId:LightSensor1",     "D_LightSensor1.xml",       S_Light)
+vMap ( "security",     48, "urn:micasaverde-com:serviceId:SecuritySensor1",  "D_MotionSensor1.xml",      S_Security)
+vMap ( "motion",       48, "urn:micasaverde-com:serviceId:SecuritySensor1",  "D_MotionSensor1.xml",      S_Security)
+vMap ( "switch",       37, "urn:upnp-org:serviceId:SwitchPower1",            "D_BinaryLight1.xml",       S_SwitchPower)
+vMap ( "temperature",  49, "urn:upnp-org:serviceId:TemperatureSensor1",      "D_TemperatureSensor1.xml", S_Temperature)
+vMap ( "switchRGBW",    0, "urn:micasaverde-com:serviceId:Color1",           "D_DimmableRGBLight1.xml",  S_Color)
+vMap ( "controller",    0, "urn:micasaverde-com:serviceId:SceneController1", "D_SceneController1.xml",   S_SceneController)
+vMap ( "thermostat",   56,  nil,                                             "D_HVAC_ZoneThermostat1.xml", S_Unknown)
+vMap ( "battery",     128, "urn:micasaverde-com:serviceId:HaDevice1",         nil,                       S_HaDevice)
+vMap ( "camera",        0,  nil,                                             "D_DigitalSecurityCamera1.xml", nil)
+vMap ( "combo",         0, "urn:schemas-micasaverde-com:device:ComboDevice:1", "D_ComboDevice1.xml",     S_Unknown)
+vMap ( "energy",       50, "urn:micasaverde-com:serviceId:EnergyMetering1",    nil,                      S_EnergyMetering)
 
 --[[
 
@@ -497,13 +498,17 @@ local function analyze (devices)
     for _, v in ipairs (instances) do
       local altid = v.id: match "([%-%w]+)$"
       local node, instance, c_class, scale, other, char = altid: match "^(%d+)%-(%d+)%-(%d+)%-?(%d*)%-?(.-)%-?(%a*)$"
-      local ptype = v.probeType
+      local met = v.metrics or {}
+--      local ptype = v.probeType
+      local ptype = met.icon
       local dtype = wMap[v.deviceType]
+      local N = tonumber (c_class) or 0
+      local excluded = {}
       v.meta = {
-        child     = instance ~= "0" or (scale ~= '' and DEV [v.probeType]),
+--        child     = instance ~= "0" or (scale ~= '' and DEV [v.probeType]),
+        child     = DEV[dtype] and not excluded[N] and 0 < N and N < 128,
         device    = DEV[ptype] or DEV[dtype] or DEV.generic,
         service   = SID[ptype] or SID[dtype] or SID.generic,
---        update    = (ACT[ptype] or ACT[dtype] or S_Unknown).update,
         label     = ptype ~= '' and ptype or dtype,
         altid     = altid,
         node      = node,
@@ -524,15 +529,18 @@ local function node_type (instances)
   
   local function singleton () return #instances == 1 and instances[1].meta.device end
   local function controller() return svcSet[SID.controller] and DEV.controller end
+  local function switch() return svcSet[SID.switch] and DEV.switch end
   local function dimmer() local n = svcSet[SID.multilevel] return n and (n >= 3 and DEV.switchRGBW or DEV.multilevel) end
   local function security() return svcSet[SID.security] and DEV.security end
   local function combo() return DEV.combo end    -- it's a mess
   
+  local children = {}
   for _, v in ipairs (instances) do
+    children[v.meta.node] = (children[v.meta.node] or 0) + 1
     svcSet[v.meta.service] = (svcSet[v.meta.service] or 0) + 1
   end
   
-  return singleton() or controller() or dimmer() or security() or combo()
+  return singleton() or controller() or switch() or security() or dimmer() or combo()
 end
 
 
