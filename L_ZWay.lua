@@ -83,39 +83,6 @@ local function on_or_off (x)
 end
 
 
---[[
-
-instance = {
-    creationTime = 1468168215,
-    creatorId = 1,
-    deviceType = "sensorMultilevel",
-    h = 618053595,
-    hasHistory = false,
-    id = "ZWayVDev_zway_9-0-49-3",
-    location = 0,
-    metrics = {
-      icon = "luminosity",
-      level = 9,
-      probeTitle = "Luminiscence",
-      scaleTitle = "Lux",
-      title = "Aeon Labs Luminiscence (9.0.49.3)"
-    },
-    permanently_hidden = false,
-    probeType = "luminosity",
-    tags = {},
-    updateTime = 1468837030,
-    visibility = true
-  }
-
-vDev commands:
-1. ’update’: updates a sensor value
-2. ’on’: turns a device on. Only valid for binary commands
-3. ’off’: turns a device off. Only valid for binary commands
-4. ’exact’: sets the device to an exact value. This will be a temperature for thermostats or a percentage value of motor controls or dimmers
-
---]]
-
-
 ----------------------------------------------------
 --
 -- COMMAND CLASSES - virtual device updates
@@ -214,14 +181,32 @@ function command_class.new (dino, meta)
     end
 end
 
+-----------------------------------------
+--
+-- DEVICE status updates: ZWay => openLuup
+--
+D = {}
+
+function _G.updateChildren (d)
+  D = d or Z.devices () or {}
+--  setVar ("DisplayLine1", #d.." devices, " .. Nscn .. " scenes", SID.altui)
+  setVar ("DisplayLine1", #D.." vDevs", SID.AltUI)
+  for _,instance in pairs (D) do 
+    local altid = instance.id: match "^ZWayVDev_zway_.-([%w%-]+)$"
+    if altid then
+      service_update [altid] (instance)
+    end
+  end
+  luup.call_delay ("updateChildren", 2)
+end
+
+
 ----------------------------------------------------
 --
 -- SERVICES - virtual services
 --
 
-
 local services = {}
-
 
 -- urn:schemas-micasaverde-com:service:HaDevice:1
 local S_HaDevice = {
@@ -323,6 +308,31 @@ local S_Unknown = {     -- "catch-all" service
 
 }
 
+-----------------------------------------
+--
+-- ACTION command callbacks: openLuup => Zway
+--
+
+local function generic_action (serviceId, action)
+  local function noop(lul_device) 
+    local message = "service/action not implemented: %d.%s.%s"
+    log (message: format (lul_device, serviceId, action))
+    return false
+  end 
+  local service = services[serviceId] or {}
+  return { run = service [action] or noop }
+end
+
+
+----------------------------------------------------
+
+-- DEVICES
+
+-- use Device maps to lookup Vera category, hence device type...
+-- ...and from the device file we can then get services...
+-- ...and from the service files, the actions and variables.
+--
+
 
 local function vMap (name, cc, sid, dev, act)
   ACT[name] = act
@@ -348,6 +358,38 @@ vMap ( "battery",     128, "urn:micasaverde-com:serviceId:HaDevice1",         ni
 vMap ( "camera",        0,  nil,                                             "D_DigitalSecurityCamera1.xml", nil)
 vMap ( "combo",         0, "urn:schemas-micasaverde-com:device:ComboDevice:1", "D_ComboDevice1.xml",     S_Unknown)
 vMap ( "energy",       50, "urn:micasaverde-com:serviceId:EnergyMetering1",    nil,                      S_EnergyMetering)
+
+--[[
+
+instance = {
+    creationTime = 1468168215,
+    creatorId = 1,
+    deviceType = "sensorMultilevel",
+    h = 618053595,
+    hasHistory = false,
+    id = "ZWayVDev_zway_9-0-49-3",
+    location = 0,
+    metrics = {
+      icon = "luminosity",
+      level = 9,
+      probeTitle = "Luminiscence",
+      scaleTitle = "Lux",
+      title = "Aeon Labs Luminiscence (9.0.49.3)"
+    },
+    permanently_hidden = false,
+    probeType = "luminosity",
+    tags = {},
+    updateTime = 1468837030,
+    visibility = true
+  }
+
+vDev commands:
+1. ’update’: updates a sensor value
+2. ’on’: turns a device on. Only valid for binary commands
+3. ’off’: turns a device off. Only valid for binary commands
+4. ’exact’: sets the device to an exact value. This will be a temperature for thermostats or a percentage value of motor controls or dimmers
+
+--]]
 
 --[[
 
@@ -393,15 +435,6 @@ PROBE Types:
   'alarm_clock'
 [
 --]]
-
-----------------------------------------------------
-
--- DEVICES
-
--- use Device maps to lookup Vera category, hence device type...
--- ...and from the device file we can then get services...
--- ...and from the service files, the actions and variables.
---
 
 
 --[[
@@ -506,7 +539,7 @@ local function analyze (devices)
       local excluded = {}
       v.meta = {
 --        child     = instance ~= "0" or (scale ~= '' and DEV [v.probeType]),
-        child     = DEV[dtype] and not excluded[N] and 0 < N and N < 128,
+        child     = (DEV[ptype] or DEV[dtype]) and 0 < N and N < 128,
         device    = DEV[ptype] or DEV[dtype] or DEV.generic,
         service   = SID[ptype] or SID[dtype] or SID.generic,
         label     = ptype ~= '' and ptype or dtype,
@@ -619,39 +652,6 @@ local function syncChildren(devNo, devices)
 end
 
 
------------------------------------------
---
--- DEVICE status updates: ZWay => openLuup
---
-
-function _G.updateChildren (d)
-  d = d or Z.devices () 
---  setVar ("DisplayLine1", #d.." devices, " .. Nscn .. " scenes", SID.altui)
-  setVar ("DisplayLine1", #(d or {}).." vDevs", SID.AltUI)
-  for _,instance in pairs (d) do 
-    local altid = instance.id: match "^ZWayVDev_zway_.-([%w%-]+)$"
-    if altid then
-      service_update [altid] (instance)
-    end
-  end
-  luup.call_delay ("updateChildren", 2)
-end
-
-
------------------------------------------
---
--- ACTION command callbacks: openLuup => Zway
---
-
-local function generic_action (serviceId, action)
-  local function noop(lul_device) 
-    local message = "service/action not implemented: %d.%s.%s"
-    log (message: format (lul_device, serviceId, action))
-    return false
-  end 
-  local service = services[serviceId] or {}
-  return { run = service [action] or noop }
-end
 
 -----------------------------------------
 --
@@ -720,6 +720,15 @@ end
 
 -----------------------------------------
 --
+-- HTTP server
+--
+
+local function server (request, parameters)
+  return json.encode (D), "application/json"
+end
+
+-----------------------------------------
+--
 -- Z-Way()  STARTUP
 --
 
@@ -750,6 +759,10 @@ function init(devNo)
     luup.set_failure (0, devNo)	        -- openLuup is UI7 compatible
     status, comment = true, "OK"
   
+    local handler = "HTTP_Z-Way_" .. devNo
+    _G[handler] = server          -- device-specific ID allows multiple plugin instances
+    luup.register_handler (handler, 'z' .. devNo)
+    
     local vDevs = Z.devices ()
     service_update = syncChildren (devNo, vDevs)
     _G.updateChildren (vDevs)
