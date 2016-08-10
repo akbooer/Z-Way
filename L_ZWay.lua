@@ -163,6 +163,13 @@ local command_class = {
     if var then setVar (var, inst.metrics.level, SID.Energy, d) end
   end,
   
+  -- door lock
+  ["98"] = function (d, inst, meta)
+--      setVar ("Status",on_or_off (inst.metrics.level), SID.switch, d)
+      setVar ("Status",inst.metrics.level, SID.door, d)
+  end,
+
+  
   -- battery
   ["128"] = function (d, inst, meta)
     setVar ("BatteryLevel", inst.metrics.level, SID.hadevice, d)
