@@ -303,6 +303,19 @@ local S_SceneController = {
 
 }
 
+local S_DoorLock = {
+     
+    SetTarget = function (d, args)
+--      local value = on_or_off (args.newTargetValue)
+      local value = args.newTargetValue
+      local altid = luup.devices[d].id
+      altid = altid: match "^%d+$" and altid.."-0-98" or altid
+      Z.command (altid, value)
+    end,
+ 
+}
+
+
 local S_Unknown = {     -- "catch-all" service
 
 }
@@ -349,14 +362,15 @@ vMap ( "humidity",     49, "urn:micasaverde-com:serviceId:HumiditySensor1",  "D_
 vMap ( "luminosity",   49, "urn:micasaverde-com:serviceId:LightSensor1",     "D_LightSensor1.xml",       S_Light)
 vMap ( "security",     48, "urn:micasaverde-com:serviceId:SecuritySensor1",  "D_MotionSensor1.xml",      S_Security)
 vMap ( "motion",       48, "urn:micasaverde-com:serviceId:SecuritySensor1",  "D_MotionSensor1.xml",      S_Security)
-vMap ( "smoke",        48, "urn:micasaverde-com:serviceId:SecuritySensor1",  "D_SmokeSensor1.xml",      S_Security)
+vMap ( "smoke",        48, "urn:micasaverde-com:serviceId:SecuritySensor1",  "D_SmokeSensor1.xml",       S_Security)
 vMap ( "switch",       37, "urn:upnp-org:serviceId:SwitchPower1",            "D_BinaryLight1.xml",       S_SwitchPower)
 vMap ( "temperature",  49, "urn:upnp-org:serviceId:TemperatureSensor1",      "D_TemperatureSensor1.xml", S_Temperature)
 vMap ( "switchRGBW",    0, "urn:micasaverde-com:serviceId:Color1",           "D_DimmableRGBLight1.xml",  S_Color)
 vMap ( "controller",    0, "urn:micasaverde-com:serviceId:SceneController1", "D_SceneController1.xml",   S_SceneController)
 vMap ( "thermostat",   56,  nil,                                             "D_HVAC_ZoneThermostat1.xml", S_Unknown)
-vMap ( "camera",        0,  nil,                                             "D_DigitalSecurityCamera1.xml", nil)
-vMap ( "combo",         0, "urn:schemas-micasaverde-com:device:ComboDevice:1", "D_ComboDevice1.xml",     S_Unknown)
+vMap ( "camera",        0,  nil,                                             "D_DigitalSecurityCamera1.xml", S_Unknown)
+vMap ( "combo",         0, "urn:micasaverde-com:serviceId:ComboDevice1",     "D_ComboDevice1.xml",       S_Unknown)
+vMap ( "door",         98, "urn:micasaverde-com:serviceId:DoorLock1",        "D_DoorLock1.xml",          S_DoorLock)
 
 -- D_Siren1.xml
 -- D_SmokeSensor1.xml"
