@@ -2,15 +2,13 @@ module (..., package.seeall)
 
 local ABOUT = {
   NAME          = "L_ZWay",
-  VERSION       = "2016.08.10",
+  VERSION       = "2016.08.11",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2016 AKBooer",
   DOCUMENTATION = "",
 }
 
-
---local pretty  = require "pretty"
 
 local loader  = require "openLuup.loader"
 local json    = require "openLuup.json"
@@ -82,6 +80,11 @@ local function on_or_off (x)
   return y[on or x] or x
 end
 
+local function open_or_close (x)
+  local y = {["open"] = "1", ["close"] = "0", ["1"] = "open", ["0"] = "close"}
+  return y[x] or x
+end
+
 
 ----------------------------------------------------
 --
@@ -120,14 +123,14 @@ local command_class = {
 
   -- binary switch
   ["37"] = function (d, inst, meta)
-      setVar ("Status",on_or_off (inst.metrics.level), SID.switch, d)
+      setVar ("Status",on_or_off (inst.metrics.level), meta.service, d)
   end,
 
   -- multilevel switch
   ["38"] = function (d, inst, meta) 
     local level = tonumber (inst.metrics.level) or 0
-    setVar ("LoadLevelTarget", level, SID.multilevel, d)
-    setVar ("LoadLevelStatus", level, SID.multilevel, d)
+    setVar ("LoadLevelTarget", level, meta.service, d)
+    setVar ("LoadLevelStatus", level, meta.service, d)
     local status = (level > 0 and "1") or "0"
     setVar ("Status", status, SID.switch, d)
   end,
@@ -160,13 +163,12 @@ local command_class = {
   -- meter
   ["50"] = function (d, inst, meta)
     local var = (inst.metrics.scaleTitle or '?'): upper ()
-    if var then setVar (var, inst.metrics.level, SID.Energy, d) end
+    if var then setVar (var, inst.metrics.level, meta.service, d) end
   end,
   
   -- door lock
   ["98"] = function (d, inst, meta)
---      setVar ("Status",on_or_off (inst.metrics.level), SID.switch, d)
-      setVar ("Status",inst.metrics.level, SID.door, d)
+      setVar ("Status",open_or_close (inst.metrics.level), SID.door, d)
   end,
 
   
@@ -199,7 +201,7 @@ function _G.updateChildren (d)
   D = d or Z.devices () or {}
   for _,instance in pairs (D) do 
     local altid = instance.id: match "^ZWayVDev_zway_.-([%w%-]+)$"
-    if altid and service_update [altid] then-- TODO: find out why this might be nil
+    if altid and service_update [altid] then
       service_update [altid] (instance)
     end
   end
@@ -217,7 +219,7 @@ local services = {}
 -- urn:schemas-micasaverde-com:service:HaDevice:1
 local S_HaDevice = {
     
-    ToggleState = function (d, args) 
+    ToggleState = function (d) 
       local status = getVar ("Status", SID.switch, d)
       status = ({['0'] = '1', ['1']= '0'}) [status] or '0'
       local value = on_or_off (status) 
@@ -313,8 +315,7 @@ local S_SceneController = {
 local S_DoorLock = {
      
     SetTarget = function (d, args)
---      local value = on_or_off (args.newTargetValue)
-      local value = args.newTargetValue
+      local value = open_or_close (args.newTargetValue)
       local altid = luup.devices[d].id
       altid = altid: match "^%d+$" and altid.."-0-98" or altid
       Z.command (altid, value)
@@ -423,47 +424,6 @@ vDev commands:
 --]]
 
 --[[
-
-PROBE Types:
-  'switchColor_rgb'
-  'switchColor_soft_white'
-  'switchColor_cold_white'
-  'switchColor_red'
-  'switchColor_green'
-  'switchColor_blue'
-  'general_purpose'
-              
-  'meterElectric_kilowatt_hour'
-  'meterElectric_watt'
-  'meterElectric_pulse_count'
-  'meterElectric_voltage'
-  'meterElectric_ampere'
-  'meterElectric_power_factor'
-                  
-  'thermostat_mode'
-  'thermostat_set_point'
-                  
-  'alarmSensor_general_purpose'
-  'alarmSensor_smoke'
-  'alarmSensor_co'
-  'alarmSensor_coo'
-  'alarmSensor_heat'
-  'alarmSensor_flood'
-  'alarmSensor_door'
-  'alarmSensor_burglar'
-  'alarmSensor_power'
-  'alarmSensor_system'
-  'alarmSensor_emergency'
-  'alarmSensor_clock'
-  'alarm_door'
-                  
-  'alarm_coo'
-  'alarm_heat'
-  'alarm_burglar'
-  'alarm_power'
-  'alarm_system'
-  'alarm_emergency'
-  'alarm_clock'
 
   -- icon types
   
@@ -588,11 +548,9 @@ local function analyze (devices)
       local altid = v.id: match "([%-%w]+)$"
       local node, instance, c_class, scale, other, char = altid: match "^(%d+)%-(%d+)%-(%d+)%-?(%d*)%-?(.-)%-?(%a*)$"
       local met = v.metrics or {}
---      local ptype = v.probeType
       local itype = met.icon
       local dtype = wMap[v.deviceType]
       local N = tonumber (c_class) or 0
-      local excluded = {[51]=true}    -- ZIP_ADV_SERVICES
       v.meta = {
         device    = command_class[c_class] and (0 < N and N < 128) and (DEV[itype] or DEV[dtype]),
         service   = SID[itype] or SID[dtype] or SID.generic,
@@ -635,25 +593,26 @@ local function analyze (devices)
     local x = {}
     for _, v in ipairs (instances) do
       if v.meta.device then
-        local t= v.meta.device: match "^D_(%a)"
+        local t= v.meta.device: match "^D_(%a%l+)"
         x[t] = (x[t] or 0) + 1
         dev[#dev+1] = v
       else
         var[#var+1] = v
       end
     end
-    
-    local label = {}
-    for a,b in pairs(x) do
-      label[#label+1] = table.concat {a,'x', b}
-    end
-    table.sort (label)
-    
+        
     -- create top-level device: three different sorts
     
     local devType = deviceType[#dev] or deviceType[2] 
     local d = devType (node, dev, var)
-    d.label = table.concat (label, ', ')
+    if d.upnp_file == DEV.combo then 
+      local label = {}
+      for a,b in pairs(x) do
+        label[#label+1] = table.concat {a,':', b}
+      end
+      table.sort (label)
+      d.label = table.concat { SID.AltUI, ',', "DisplayLine1", '=', table.concat (label, ' ') }
+    end
     luupDevs[#luupDevs+1] = d
     luupDevs[node] = d            -- also index by node id (string)
   end
@@ -662,8 +621,9 @@ local function analyze (devices)
 end
 
 
-local function appendZwayDevice (lul_device, handle, name, altid, upnp_file)
+local function appendZwayDevice (lul_device, handle, name, altid, upnp_file, extra)
   local parameters = parameter_list (upnp_file)
+  parameters = table.concat ({parameters, extra}, '\n')
   luup.chdev.append (
     lul_device, handle,   -- parent device and handle
     altid, name, 				  -- id and description
@@ -690,14 +650,14 @@ local function syncChildren(devNo, devices)
     
   local handle = luup.chdev.start(devNo);
 	for _, ldv in ipairs(luupDevs) do
-    appendZwayDevice (devNo, handle, ldv.name, ldv.altid, ldv.upnp_file)
+    appendZwayDevice (devNo, handle, ldv.name, ldv.altid, ldv.upnp_file, ldv.label)
 	end
 	local reload = luup.chdev.sync(devNo, handle, no_reload)   -- sync all the top-level devices
 
   local info = "%d vDevs, %d nodes"
   setVar ("DisplayLine1", info: format (#devices, #luupDevs), SID.AltUI)
 
-  -- ...and then the child instances or additional device variables
+  -- ...and then the child instances and additional device variables
   
 	local top_level = {}
   for dino, dev in pairs(luup.devices) do
@@ -725,8 +685,7 @@ local function syncChildren(devNo, devices)
       
       -- top-level device variables
       for _, instance in ipairs (this.variables) do
-       local m = instance.meta
-       local name = m.label .. '_' .. m.altid            -- add variable
+        local m = instance.meta
         updater[m.altid] = command_class.new (dino, m)    -- create specific updaters for each device variable
       end
 
@@ -761,7 +720,8 @@ local function ZWayVDev_API (ip, user, password)
   local function HTTP_request (url, body)
     local response_body = {}
     local method = body and "POST" or "GET"
-    local response, status, headers = http.request{
+--    local response, status, headers = http.request{
+    local _, status = http.request{
       method = method,
       url=url,
       headers = {
@@ -782,7 +742,7 @@ local function ZWayVDev_API (ip, user, password)
   local function authenticate ()
     local url = "http://%s:8083/ZAutomation/api/v1/login"
     local data = json.encode {login=user, password = password}
-    local status, j = HTTP_request (url: format (ip), data)
+    local _, j = HTTP_request (url: format (ip), data)
     
     if j then
       local sid = j and j.data and j.data.sid
@@ -793,7 +753,7 @@ local function ZWayVDev_API (ip, user, password)
 
   local function devices ()
     local url = "http://%s:8083/ZAutomation/api/v1/devices"
-    local status, d = HTTP_request (url: format (ip))    
+    local _, d = HTTP_request (url: format (ip))    
     return d and d.data and d.data.devices
   end
   
@@ -813,15 +773,6 @@ local function ZWayVDev_API (ip, user, password)
   end
 end
 
-
------------------------------------------
---
--- HTTP server
---
-
-local function server (request, parameters)
-  return json.encode (D), "application/json"
-end
 
 -----------------------------------------
 --
@@ -856,8 +807,9 @@ function init(devNo)
     luup.set_failure (0, devNo)	        -- openLuup is UI7 compatible
     status, comment = true, "OK"
   
+    -- device-specific ID for HTTP handler allows multiple plugin instances
     local handler = "HTTP_Z-Way_" .. devNo
-    _G[handler] = server          -- device-specific ID allows multiple plugin instances
+    _G[handler] = function () return json.encode (D), "application/json" end
     luup.register_handler (handler, 'z' .. devNo)
     
     local vDevs = Z.devices ()
