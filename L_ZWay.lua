@@ -216,6 +216,14 @@ end
 
 local services = {}
 
+--[[
+vDev commands:
+1. ’update’: updates a sensor value
+2. ’on’: turns a device on. Only valid for binary commands
+3. ’off’: turns a device off. Only valid for binary commands
+4. ’exact’: sets the device to an exact value. This will be a temperature for thermostats or a percentage value of motor controls or dimmers
+--]]
+
 -- urn:schemas-micasaverde-com:service:HaDevice:1
 local S_HaDevice = {
     
@@ -257,22 +265,6 @@ local S_Dimming = {
     
   }
 
-
-local S_Generic = {
-    
-  }
-
-
-local S_Light = {
-    
-  }
-
-
-local S_Humidity = {
-    
-  }
-
-
 local S_Temperature = {
     
   GetCurrentTemperature = function () end,  -- return value handled by action request mechanism
@@ -292,25 +284,33 @@ local S_Color = {
 
   SetColorRGB = function (d, args)
      -- args.newColorRGBTarget = "61,163,69"
-
-    log (json.encode {
-        newColorRGBTarget = args.newColorRGBTarget,
-        serviceId = args.serviceId,
-        switchRBG = SID.switchRGBW,
-        device = d,
-        })
+    
+    local r,g,b = (args.newColorRGBTarget or ''): match "^(%d+),(%d+),(%d+)"
+    if not b then return end
+    local rgb = {r,g,b}
+        
+    -- find our child devices...
+    local c = {}
+    for i,dev in pairs (luup.devices) do
+      if dev.device_num_parent == d then
+        c[#c+1] = {devNo = i, altid = dev.id}
+      end
+    end
+    table.sort (c, function (a,b) return a.altid < b.altid end)
+    if #c < 5 then return end
+          
+    -- assume the order M1 M1 R G B (w)
+    
+    for i = 1,3 do
+      log ("setting: " .. rgb[i])
+      local level = math.floor ((rgb[i]/256)^2 * 100) -- map 0-255 to 0-100, with a bit of gamma
+      S_Dimming.SetLoadLevelTarget (c[i+2].devNo, {newLoadlevelTarget = level}) 
+    end
+    
   end,
   
 }
 
--- urn:micasaverde-com:serviceId:EnergyMetering1
-local S_EnergyMetering = {
-  
-}
-
-local S_SceneController = { 
-
-}
 
 local S_DoorLock = {
      
@@ -323,10 +323,14 @@ local S_DoorLock = {
  
 }
 
+local S_Generic   = { }
+local S_Light     = { }
+local S_Humidity  = { }
 
-local S_Unknown = {     -- "catch-all" service
+local S_EnergyMetering  = { }   -- urn:micasaverde-com:serviceId:EnergyMetering1
+local S_SceneController = { }
+local S_Unknown = { }   -- "catch-all" service
 
-}
 
 -----------------------------------------
 --
@@ -353,8 +357,7 @@ end
 -- ...and from the service files, the actions and variables.
 --
 
-
-local function vMap (name, cc, sid, dev, act)
+local function vMap (name, _, sid, dev, act)
   ACT[name] = act
   DEV[name] = dev
   SID[name] = sid
@@ -362,9 +365,12 @@ local function vMap (name, cc, sid, dev, act)
 end
   
 -- TODO: JSON files for sub-types
+-- D_UVSensor.json
+-- D_LeakSensor1.json
+-- D_SmokeCoSensor1.json"
 
 vMap ( "multilevel",   38, "urn:upnp-org:serviceId:Dimming1",                "D_DimmableLight1.xml",     S_Dimming)
-vMap ( "ultraviolet",  49, "urn:micasaverde-com:serviceId:LightSensor1",     "D_GenericSensor1.xml",     S_Generic)
+vMap ( "ultraviolet",  49, "urn:micasaverde-com:serviceId:LightSensor1",     "D_LightSensor1.xml",       S_Generic)
 vMap ( "hadevice",      0, "urn:micasaverde-com:serviceId:HaDevice1",        "D_ComboDevice1.xml",       S_HaDevice)        
 vMap ( "humidity",     49, "urn:micasaverde-com:serviceId:HumiditySensor1",  "D_HumiditySensor1.xml",    S_Humidity)
 vMap ( "luminosity",   49, "urn:micasaverde-com:serviceId:LightSensor1",     "D_LightSensor1.xml",       S_Light)
@@ -382,13 +388,11 @@ vMap ( "door",         98, "urn:micasaverde-com:serviceId:DoorLock1",        "D_
 
 -- D_Siren1.xml
 -- D_SmokeSensor1.xml"
--- D_SmokeCoSensor1.json"
--- D_UVSensor1.json (actually a Light sensor"
 
 vMap ( "generic",      49, "urn:micasaverde-com:serviceId:GenericSensor1",   nil,     S_Generic)
 vMap ( "battery",     128, "urn:micasaverde-com:serviceId:HaDevice1",         nil,                       S_HaDevice)
 vMap ( "energy",       50, "urn:micasaverde-com:serviceId:EnergyMetering1",    nil,                      S_EnergyMetering)
---vMap ( "meter",       50, "urn:micasaverde-com:serviceId:EnergyMetering1",    nil,                      S_EnergyMetering)
+--vMap ( "meter",       50, "urn:micasaverde-com:serviceId:EnergyMetering1",    "D_PowerMeter1.xml",     S_EnergyMetering)
 
 
 --[[
@@ -414,12 +418,6 @@ instance = {
     updateTime = 1468837030,
     visibility = true
   }
-
-vDev commands:
-1. ’update’: updates a sensor value
-2. ’on’: turns a device on. Only valid for binary commands
-3. ’off’: turns a device off. Only valid for binary commands
-4. ’exact’: sets the device to an exact value. This will be a temperature for thermostats or a percentage value of motor controls or dimmers
 
 --]]
 
@@ -513,19 +511,69 @@ local function parameter_list (upnp_file)
   return parameters
 end
 
+-- transform each node into some sort of Luup device structure with parents and children
+local function luupDevice (node, instances) 
 
-local function index_nodes (d)
-  local index = {}     -- virtual device number indexed by node number
-  for _,v in pairs (d) do 
-    local node = v.id: match "^ZWayVDev_zway_.-(%d+)" 
-    if node then
-      local t = index[node] or {}
-      t[#t+1] = v
-      index[node] = t
+  -- split into devices and variables
+  local dev, var = {}, {}
+  local children = {}         -- count of children indexed by (shorthand) device type
+  for _, v in ipairs (instances) do
+    if v.meta.device then
+      local t= v.meta.device: match "^D_(%a%l+)"
+      children[t] = (children[t] or 0) + 1
+      dev[#dev+1] = v
+    else
+      var[#var+1] = v
     end
   end
-  return index
+      
+  -- create top-level device: three different sorts:
+  local Ndev = #dev
+  local upnp_file, altid, dtype, display1
+  
+  -- a controller has no devices and is just a collection of buttons and switches or other services 
+  if Ndev == 0 then
+    upnp_file, altid, dtype = DEV.controller, var[1].meta.node, "controller"
+    
+  -- a singleton device is a node with only one vDev device
+  elseif Ndev == 1 then
+    upnp_file, altid = dev[1].meta.device, dev[1].meta.altid 
+    
+  -- a combo device is a collection of more than one vDev device, and may have service variables
+  else
+    upnp_file, altid, dtype = DEV.combo, dev[1].meta.node, " combo"  -- (the space is important)
+    
+    -- HOWEVER...
+    local dimmers = children.Dimmable
+    if dimmers and dimmers > 3 then -- ... we'll asume that it's an RGB switch
+      dtype = " RGB" 
+      upnp_file = DEV.switchRGBW
+    end
+    local label = {}
+    for a,b in pairs(children) do
+      label[#label+1] = table.concat {a,':', b}
+    end
+    table.sort (label)
+    display1 = table.concat { SID.AltUI, ',', "DisplayLine1", '=', table.concat (label, ' ') }
+  end
+  
+  -- return structure with info for creating the top-level device
+  local m = (dev[1] or var[1]).metrics
+  dtype = dtype or m.icon or '?'
+  local name = ("%3s: %s - %s"): format (node, m.title: match "%w+", dtype) 
+  
+  return { 
+    upnp_file = upnp_file,
+    altid = altid,
+    name = name,
+    node = node,
+    devices = dev,
+    variables = var,
+    display1 = display1,
+  } 
+
 end
+
 
 --[[
 
@@ -539,80 +587,54 @@ that supports multiple sensors with different scales in one single command class
 
 --]]
 
-local function analyze (devices)  
-  
-  -- intepret the vDev structure and devices or services with variables
-  local vDevs = index_nodes (devices)
-  for _,instances in pairs (vDevs) do
-    for _, v in ipairs (instances) do
-      local altid = v.id: match "([%-%w]+)$"
-      local node, instance, c_class, scale, other, char = altid: match "^(%d+)%-(%d+)%-(%d+)%-?(%d*)%-?(.-)%-?(%a*)$"
-      local met = v.metrics or {}
-      local itype = met.icon
-      local dtype = wMap[v.deviceType]
-      local N = tonumber (c_class) or 0
-      v.meta = {
-        device    = command_class[c_class] and (0 < N and N < 128) and (DEV[itype] or DEV[dtype]),
-        service   = SID[itype] or SID[dtype] or SID.generic,
-        label     = itype ~= '' and itype or dtype,
-        altid     = altid,
-        node      = node,
-        instance  = instance,
-        c_class   = c_class,
-        scale     = scale,
-        other     = other,
-        char      = char,
-      }
-    end
-  end
-  
-  -- transform into some sort of Luup device structure with parents and children
-    
-  local function luupDevice (n, d, v, u, a, dv, x) 
-    local m = dv[1].metrics
-    local dtype = x or m.icon or '?'
-    local name = ("%3s: %s - %s"): format (n, m.title: match "%w+", dtype) 
-    return { upnp_file = u, altid = a, name = name, node = n, devices = d, variables = v } 
-  end
+local NICS_pattern = "^(%d+)%-(%d+)%-(%d+)%-?(%d*)%-?(.-)%-?(%a*)$"
 
-  -- a controller has no devices and is just a collection of buttons and switches or other services 
-  -- a singleton device is a node with only one vDev device
-  -- a combo device is a collection of more than one vDev device, and may have services
-      
-  local deviceType = {
-    [0] = function (n, d, v) return luupDevice (n, d, v, DEV.controller, v[1].meta.node, v, "controller") end,
-    [1] = function (n, d, v) return luupDevice (n, d, v, d[1].meta.device, d[1].meta.altid, d) end,
-    [2] = function (n, d, v) return luupDevice (n, d, v, DEV.combo, d[1].meta.node, d, " combo") end,
+-- create metadata for each virtual device instance
+local function vDev_meta (v)
+  local altid = v.id: match "([%-%w]+)$"
+  local node, instance, c_class, scale, other, char = altid: match (NICS_pattern)
+  local met = v.metrics or {}
+  local itype = met.icon
+  local dtype = wMap[v.deviceType]
+  local N = tonumber (c_class) or 0
+  return {
+    device    = command_class[c_class] and (0 < N and N < 128) and (DEV[itype] or DEV[dtype]),
+    service   = SID[itype] or SID[dtype] or SID.generic,
+--    label     = itype ~= '' and itype or dtype,
+    altid     = altid,
+    node      = node,
+    instance  = instance,
+    c_class   = c_class,
+    scale     = scale,
+    other     = other,
+    char      = char,
   }
+end
 
+
+-- index virtual devices number by node number and build instance metadata
+local function index_nodes (d)
+  local index = {}
+  for _,v in pairs (d) do 
+    local node = v.id: match "^ZWayVDev_zway_.-(%d+)" 
+    if node then
+      v.meta = vDev_meta (v)        -- construct metadata
+      local t = index[node] or {}
+      t[#t+1] = v
+      index[node] = t
+    end
+  end
+  return index
+end
+
+-- intepret the vDev structure and devices or services with variables
+local function analyze (devices)  
+    
+  -- define the top-level devices with other instances as children
   local luupDevs = {}
+  local vDevs = index_nodes (devices)
   for node, instances in pairs(vDevs) do
-    
-    -- split into devices and variables
-    local dev, var = {}, {}
-    local x = {}
-    for _, v in ipairs (instances) do
-      if v.meta.device then
-        local t= v.meta.device: match "^D_(%a%l+)"
-        x[t] = (x[t] or 0) + 1
-        dev[#dev+1] = v
-      else
-        var[#var+1] = v
-      end
-    end
-        
-    -- create top-level device: three different sorts
-    
-    local devType = deviceType[#dev] or deviceType[2] 
-    local d = devType (node, dev, var)
-    if d.upnp_file == DEV.combo then 
-      local label = {}
-      for a,b in pairs(x) do
-        label[#label+1] = table.concat {a,':', b}
-      end
-      table.sort (label)
-      d.label = table.concat { SID.AltUI, ',', "DisplayLine1", '=', table.concat (label, ' ') }
-    end
+    local d = luupDevice (node, instances)
     luupDevs[#luupDevs+1] = d
     luupDevs[node] = d            -- also index by node id (string)
   end
@@ -636,9 +658,6 @@ end
 
 -- create correct parent/child relationship between instances
 local function syncChildren(devNo, devices)
-  
-  -- ZWayVDev [Node ID]:[Instance ID]:[Command Class ID]:[Scale ID] 
-  -- for all top-level devices
 
   local no_reload = true
 	local updater = {}
@@ -650,7 +669,7 @@ local function syncChildren(devNo, devices)
     
   local handle = luup.chdev.start(devNo);
 	for _, ldv in ipairs(luupDevs) do
-    appendZwayDevice (devNo, handle, ldv.name, ldv.altid, ldv.upnp_file, ldv.label)
+    appendZwayDevice (devNo, handle, ldv.name, ldv.altid, ldv.upnp_file, ldv.display1)
 	end
 	local reload = luup.chdev.sync(devNo, handle, no_reload)   -- sync all the top-level devices
 
