@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 local ABOUT = {
   NAME          = "L_ZWay",
-  VERSION       = "2016.08.11",
+  VERSION       = "2016.08.12",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2016 AKBooer",
@@ -364,7 +364,7 @@ local function vMap (name, _, sid, dev, act)
   if sid and act then services[sid] = act end
 end
   
--- TODO: JSON files for sub-types
+-- TODO: JSON files for sub-types ?
 -- D_UVSensor.json
 -- D_LeakSensor1.json
 -- D_SmokeCoSensor1.json"
@@ -481,100 +481,6 @@ local wMap = {
 }
 
 
-
--- this reads a device file and its service files returning a list of variables
--- which can be used in the luup.chdev.append() call to preset device variables
-local function parameter_list (upnp_file)
-  local parameters
-  if upnp_file then
-    local d = loader.read_device (upnp_file)          -- read the device file
-    local p = {}
-    local parameter = "%s,%s=%s"
-    for _, s in ipairs (d.service_list or {}) do
-      if s.SCPDURL then 
-        local svc = loader.read_service (s.SCPDURL)   -- read the service file(s)
-        for _,v in ipairs (svc.variables or {}) do
-          local default = v.defaultValue
-          if default and default ~= '' then            -- only variables with defaults
-            p[#p+1] = parameter: format (s.serviceId, v.name, default)
-          end
-        end
-      end
-      if s.serviceId == SID.controller then
-        local txt = [[Define scene triggers to watch sl_SceneActivated]] ..
-                    [[ with Lua Expression: new == "button_number"]]
-        p[#p+1] = parameter: format (s.serviceId, "Scenes", txt) 
-      end
-    end
-    parameters = table.concat (p, '\n')
-  end
-  return parameters
-end
-
--- transform each node into some sort of Luup device structure with parents and children
-local function luupDevice (node, instances) 
-
-  -- split into devices and variables
-  local dev, var = {}, {}
-  local children = {}         -- count of children indexed by (shorthand) device type
-  for _, v in ipairs (instances) do
-    if v.meta.device then
-      local t= v.meta.device: match "^D_(%a%l+)"
-      children[t] = (children[t] or 0) + 1
-      dev[#dev+1] = v
-    else
-      var[#var+1] = v
-    end
-  end
-      
-  -- create top-level device: three different sorts:
-  local Ndev = #dev
-  local upnp_file, altid, dtype, display1
-  
-  -- a controller has no devices and is just a collection of buttons and switches or other services 
-  if Ndev == 0 then
-    upnp_file, altid, dtype = DEV.controller, var[1].meta.node, "controller"
-    
-  -- a singleton device is a node with only one vDev device
-  elseif Ndev == 1 then
-    upnp_file, altid = dev[1].meta.device, dev[1].meta.altid 
-    
-  -- a combo device is a collection of more than one vDev device, and may have service variables
-  else
-    upnp_file, altid, dtype = DEV.combo, dev[1].meta.node, " combo"  -- (the space is important)
-    
-    -- HOWEVER...
-    local dimmers = children.Dimmable
-    if dimmers and dimmers > 3 then -- ... we'll asume that it's an RGB switch
-      dtype = " RGB" 
-      upnp_file = DEV.switchRGBW
-    end
-    local label = {}
-    for a,b in pairs(children) do
-      label[#label+1] = table.concat {a,':', b}
-    end
-    table.sort (label)
-    display1 = table.concat { SID.AltUI, ',', "DisplayLine1", '=', table.concat (label, ' ') }
-  end
-  
-  -- return structure with info for creating the top-level device
-  local m = (dev[1] or var[1]).metrics
-  dtype = dtype or m.icon or '?'
-  local name = ("%3s: %s - %s"): format (node, m.title: match "%w+", dtype) 
-  
-  return { 
-    upnp_file = upnp_file,
-    altid = altid,
-    name = name,
-    node = node,
-    devices = dev,
-    variables = var,
-    display1 = display1,
-  } 
-
-end
-
-
 --[[
 
 ZWayVDev [Node ID]:[Instance ID]:[Command Class ID]:[Scale ID] 
@@ -600,7 +506,6 @@ local function vDev_meta (v)
   return {
     device    = command_class[c_class] and (0 < N and N < 128) and (DEV[itype] or DEV[dtype]),
     service   = SID[itype] or SID[dtype] or SID.generic,
---    label     = itype ~= '' and itype or dtype,
     altid     = altid,
     node      = node,
     instance  = instance,
@@ -609,6 +514,76 @@ local function vDev_meta (v)
     other     = other,
     char      = char,
   }
+end
+
+
+-- transform each node into some sort of Luup device structure with parents and children
+local function luupDevice (node, instances) 
+
+  -- split into devices and variables
+  local dev, var = {}, {}
+  local children = {}         -- count of children indexed by (shorthand) device type
+  for _, v in ipairs (instances) do
+    if v.meta.device then
+      local t= v.meta.device: match "^D_(%a%l+)"
+      children[t] = (children[t] or 0) + 1
+      dev[#dev+1] = v
+    else
+      var[#var+1] = v
+    end
+  end
+      
+  -- create top-level device: three different sorts:
+  local Ndev = #dev
+  local upnp_file, altid, dtype, parameters
+  
+  -- a controller has no devices and is just a collection of buttons and switches or other services 
+  if Ndev == 0 then
+    upnp_file, altid, dtype = DEV.controller, var[1].meta.node, "controller"
+    local txt = [[Define scene triggers to watch sl_SceneActivated]] ..
+                [[ with Lua Expression: new == "button_number"]]
+    parameters = table.concat { SID.controller, ',', "Scenes", '=', txt }
+    
+  -- a singleton device is a node with only one vDev device
+  elseif Ndev == 1 then
+    upnp_file, altid = dev[1].meta.device, dev[1].meta.altid 
+    
+  -- a combo device is a collection of more than one vDev device, and may have service variables
+  else
+    upnp_file, altid, dtype = DEV.combo, dev[1].meta.node, " combo"  -- (the space is important)
+    
+    -- HOWEVER... if there are lots of dimmers, assume it's an RGB(W) combo
+ 
+    local dimmers = children.Dimmable
+    if dimmers and dimmers > 3 then     -- ... we'll asume that it's an RGB(W) switch
+      dtype = " RGB" 
+      upnp_file = DEV.switchRGBW
+      
+    else                                -- just a vanilla combination device
+      local label = {}
+      for a,b in pairs(children) do
+        label[#label+1] = table.concat {a,':', b}
+      end
+      table.sort (label)
+      parameters = table.concat { SID.AltUI, ',', "DisplayLine1", '=', table.concat (label, ' ') }
+    end
+  end
+  
+  -- return structure with info for creating the top-level device
+  local m = (dev[1] or var[1]).metrics
+  dtype = dtype or m.icon or '?'
+  local name = ("%3s: %s %s"): format (node, m.title: match "%w+", dtype) 
+  
+  return { 
+    upnp_file = upnp_file,
+    altid = altid,
+    name = name,
+    node = node,
+    devices = dev,
+    variables = var,
+    parameters = parameters,
+  } 
+
 end
 
 
@@ -627,10 +602,10 @@ local function index_nodes (d)
   return index
 end
 
+
 -- intepret the vDev structure and devices or services with variables
-local function analyze (devices)  
-    
-  -- define the top-level devices with other instances as children
+-- define the top-level devices with other instances as children
+local function analyze (devices)    
   local luupDevs = {}
   local vDevs = index_nodes (devices)
   for node, instances in pairs(vDevs) do
@@ -638,10 +613,33 @@ local function analyze (devices)
     luupDevs[#luupDevs+1] = d
     luupDevs[node] = d            -- also index by node id (string)
   end
-    
   return luupDevs
 end
 
+
+-- this reads a device file and its service files returning a list of variables
+-- which can be used in the luup.chdev.append() call to preset device variables
+local function parameter_list (upnp_file)
+  local parameters
+  if upnp_file then
+    local d = loader.read_device (upnp_file)          -- read the device file
+    local p = {}
+    local parameter = "%s,%s=%s"
+    for _, s in ipairs (d.service_list or {}) do
+      if s.SCPDURL then 
+        local svc = loader.read_service (s.SCPDURL)   -- read the service file(s)
+        for _,v in ipairs (svc.variables or {}) do
+          local default = v.defaultValue
+          if default and default ~= '' then            -- only variables with defaults
+            p[#p+1] = parameter: format (s.serviceId, v.name, default)
+          end
+        end
+      end
+    end
+    parameters = table.concat (p, '\n')
+  end
+  return parameters
+end
 
 local function appendZwayDevice (lul_device, handle, name, altid, upnp_file, extra)
   local parameters = parameter_list (upnp_file)
@@ -669,7 +667,7 @@ local function syncChildren(devNo, devices)
     
   local handle = luup.chdev.start(devNo);
 	for _, ldv in ipairs(luupDevs) do
-    appendZwayDevice (devNo, handle, ldv.name, ldv.altid, ldv.upnp_file, ldv.display1)
+    appendZwayDevice (devNo, handle, ldv.name, ldv.altid, ldv.upnp_file, ldv.parameters)
 	end
 	local reload = luup.chdev.sync(devNo, handle, no_reload)   -- sync all the top-level devices
 
@@ -695,7 +693,11 @@ local function syncChildren(devNo, devices)
           if m.altid == dev.id then                         -- don't create duplicate device!
             updater[m.altid] = command_class.new (dino, m)  -- just create its updater
           else
-            local name = ("%3s: %s - %s"): format (node, instance.metrics.title: match "%w+",  m.altid)
+            local title = "%3s: %s %s %s"
+            local metrics = instance.metrics
+            local scale = m.scale
+            local suffix = table.concat ({m.instance, (scale ~= '') and scale or nil}, '.')
+            local name = title: format (node, metrics.title: match "%w+",  metrics.icon or '?', suffix)
             updater[m.altid] = m
             appendZwayDevice (dino, handle, name, m.altid, m.device)
           end
