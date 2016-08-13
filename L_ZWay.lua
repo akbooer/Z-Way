@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 local ABOUT = {
   NAME          = "L_ZWay",
-  VERSION       = "2016.08.12",
+  VERSION       = "2016.08.13",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2016 AKBooer",
@@ -81,7 +81,7 @@ local function on_or_off (x)
 end
 
 local function open_or_close (x)
-  local y = {["open"] = "1", ["close"] = "0", ["1"] = "open", ["0"] = "close"}
+  local y = {["open"] = "0", ["close"] = "1", ["0"] = "open", ["1"] = "close"}
   return y[x] or x
 end
 
@@ -115,8 +115,8 @@ local command_class = {
       end
       
     else
-      --  local message = "no update for device %d [%s]"
-      --  log (message: format (d, inst.id))
+--        local message = "no update for device %d [%s] %s %s"
+--        log (message: format (d, inst.id, inst.deviceType or '?', (inst.metrics or {}).icon or ''))
       --...
     end
   end,
@@ -136,7 +136,7 @@ local command_class = {
   end,
   
   -- binary sensor
-  ["48"] = function (d, inst, meta)
+  ["48"] = function (d, inst)
     local sid = SID.security
     local tripped = on_or_off (inst.metrics.level)
     local old = getVar ("Tripped", sid)
@@ -167,13 +167,13 @@ local command_class = {
   end,
   
   -- door lock
-  ["98"] = function (d, inst, meta)
+  ["98"] = function (d, inst)
       setVar ("Status",open_or_close (inst.metrics.level), SID.door, d)
   end,
 
   
   -- battery
-  ["128"] = function (d, inst, meta)
+  ["128"] = function (d, inst)
     setVar ("BatteryLevel", inst.metrics.level, SID.hadevice, d)
   end,
 
@@ -195,7 +195,7 @@ end
 -- DEVICE status updates: ZWay => openLuup
 --
 
-D = {}    -- global device structure simply for the HTTP callback diagnostic
+local D = {}    -- device structure simply for the HTTP callback diagnostic
 
 function _G.updateChildren (d)
   D = d or Z.devices () or {}
@@ -282,12 +282,10 @@ local S_Security = {
 
 local S_Color = {
 
+  -- args.newColorRGBTarget = "61,163,69"
   SetColorRGB = function (d, args)
-     -- args.newColorRGBTarget = "61,163,69"
-    
-    local r,g,b = (args.newColorRGBTarget or ''): match "^(%d+),(%d+),(%d+)"
-    if not b then return end
-    local rgb = {r,g,b}
+    local rgb = { (args.newColorRGBTarget or ''): match "^(%d+),(%d+),(%d+)" }
+    if #rgb ~= 3 then return end
         
     -- find our child devices...
     local c = {}
@@ -306,7 +304,6 @@ local S_Color = {
       local level = math.floor ((rgb[i]/256)^2 * 100) -- map 0-255 to 0-100, with a bit of gamma
       S_Dimming.SetLoadLevelTarget (c[i+2].devNo, {newLoadlevelTarget = level}) 
     end
-    
   end,
   
 }
