@@ -180,6 +180,7 @@ local command_class = {
 }
 
 command_class["113"] = command_class["48"]      -- alarm
+command_class["102"] = command_class["98"]      -- barrier (garage door)
     
 function command_class.new (dino, meta) 
   local updater = command_class[meta.c_class] or command_class["0"]
@@ -224,20 +225,6 @@ vDev commands:
 4. ’exact’: sets the device to an exact value. This will be a temperature for thermostats or a percentage value of motor controls or dimmers
 --]]
 
--- urn:schemas-micasaverde-com:service:HaDevice:1
-local S_HaDevice = {
-    
-    ToggleState = function (d) 
-      local status = getVar ("Status", SID.switch, d)
-      status = ({['0'] = '1', ['1']= '0'}) [status] or '0'
-      local value = on_or_off (status) 
-      local altid = luup.devices[d].id
-      altid = altid: match "^%d+$" and altid.."-0-37" or altid
-      Z.command (altid, value)
-    end,
-    
-  }
-
 
 -- urn:upnp-org:serviceId:SwitchPower1
 local S_SwitchPower = {
@@ -264,6 +251,19 @@ local S_Dimming = {
     end,
     
   }
+
+
+-- urn:schemas-micasaverde-com:service:HaDevice:1
+local S_HaDevice = {
+    
+    ToggleState = function (d) 
+      local toggle = {['0'] = '1', ['1']= '0'}
+      local status = getVar ("Status", SID.switch, d)
+      S_SwitchPower.SetTarget {d, {newLoadlevelTarget = toggle [status] or '0'}}
+    end,
+    
+  }
+
 
 local S_Temperature = {
     
@@ -297,7 +297,7 @@ local S_Color = {
     table.sort (c, function (a,b) return a.altid < b.altid end)
     if #c < 5 then return end
           
-    -- assume the order M1 M1 R G B (w)
+    -- assume the order M0 M1 R G B (w)
     
     for i = 1,3 do
       log ("setting: " .. rgb[i])
@@ -568,7 +568,8 @@ local function luupDevice (node, instances)
   
   -- return structure with info for creating the top-level device
   local m = (dev[1] or var[1]).metrics
-  dtype = dtype or m.icon or '?'
+  local alias = {smoke = "alarm"}
+  dtype = alias[dtype] or dtype or m.icon or '?'
   local name = ("%3s: %s %s"): format (node, m.title: match "%w+", dtype) 
   
   return { 
