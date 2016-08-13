@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 local ABOUT = {
   NAME          = "L_ZWay",
-  VERSION       = "2016.08.13c",
+  VERSION       = "2016.08.13d",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2016 AKBooer",
@@ -568,8 +568,8 @@ local function luupDevice (node, instances)
   
   -- return structure with info for creating the top-level device
   local m = (dev[1] or var[1]).metrics
-  local alias = {smoke = "alarm"}
-  dtype = dtype or alias[m.icon] or m.icon or '?'
+--  local alias = {smoke = "alarm"}  TODO: alias for 'smoke' alarms
+  dtype = dtype or m.icon or '?'
   local name = ("%3s: %s %s"): format (node, m.title: match "%w+", dtype) 
   
   return { 
