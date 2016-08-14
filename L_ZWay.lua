@@ -230,7 +230,7 @@ vDev commands:
 local S_SwitchPower = {
     
     SetTarget = function (d, args)
-      local value = on_or_off (args.newTargetValue)
+      local value = on_or_off (args.newTargetValue or '0')
       local altid = luup.devices[d].id
       altid = altid: match "^%d+$" and altid.."-0-37" or altid
       Z.command (altid, value)
@@ -259,7 +259,7 @@ local S_HaDevice = {
     ToggleState = function (d) 
       local toggle = {['0'] = '1', ['1']= '0'}
       local status = getVar ("Status", SID.switch, d)
-      S_SwitchPower.SetTarget {d, {newLoadlevelTarget = toggle [status] or '0'}}
+      S_SwitchPower.SetTarget (d, {newTargetValue = toggle [status] or '0'})
     end,
     
   }
@@ -379,7 +379,7 @@ vMap ( "switch",       37, "urn:upnp-org:serviceId:SwitchPower1",            "D_
 vMap ( "temperature",  49, "urn:upnp-org:serviceId:TemperatureSensor1",      "D_TemperatureSensor1.xml", S_Temperature)
 vMap ( "switchRGBW",    0, "urn:micasaverde-com:serviceId:Color1",           "D_DimmableRGBLight1.xml",  S_Color)
 vMap ( "controller",    0, "urn:micasaverde-com:serviceId:SceneController1", "D_SceneController1.xml",   S_SceneController)
-vMap ( "thermostat",   56,  "urn:upnp-org:serviceId:TemperatureSetpoint1",   "D_HVAC_ZoneThermostat1.xml", S_Unknown)
+vMap ( "thermostat",   56, "urn:upnp-org:serviceId:TemperatureSetpoint1",    "D_HVAC_ZoneThermostat1.xml", S_Unknown)
 vMap ( "camera",        0, "urn:micasaverde-com:serviceId:Camera1",          "D_DigitalSecurityCamera1.xml", S_Camera)
 vMap ( "combo",         0, "urn:micasaverde-com:serviceId:ComboDevice1",     "D_ComboDevice1.xml",       S_Unknown)
 vMap ( "door",         98, "urn:micasaverde-com:serviceId:DoorLock1",        "D_DoorLock1.xml",          S_DoorLock)
