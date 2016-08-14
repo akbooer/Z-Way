@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 local ABOUT = {
   NAME          = "L_ZWay",
-  VERSION       = "2016.08.13d",
+  VERSION       = "2016.08.14",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2016 AKBooer",
@@ -179,7 +179,7 @@ local command_class = {
 
 }
 
-command_class["113"] = command_class["48"]      -- alarm
+--command_class["113"] = command_class["48"]      -- alarm
 command_class["102"] = command_class["98"]      -- barrier (garage door)
     
 function command_class.new (dino, meta) 
@@ -323,6 +323,7 @@ local S_DoorLock = {
 local S_Generic   = { }
 local S_Light     = { }
 local S_Humidity  = { }
+local S_Camera    = { }
 
 local S_EnergyMetering  = { }   -- urn:micasaverde-com:serviceId:EnergyMetering1
 local S_SceneController = { }
@@ -378,8 +379,8 @@ vMap ( "switch",       37, "urn:upnp-org:serviceId:SwitchPower1",            "D_
 vMap ( "temperature",  49, "urn:upnp-org:serviceId:TemperatureSensor1",      "D_TemperatureSensor1.xml", S_Temperature)
 vMap ( "switchRGBW",    0, "urn:micasaverde-com:serviceId:Color1",           "D_DimmableRGBLight1.xml",  S_Color)
 vMap ( "controller",    0, "urn:micasaverde-com:serviceId:SceneController1", "D_SceneController1.xml",   S_SceneController)
-vMap ( "thermostat",   56,  nil,                                             "D_HVAC_ZoneThermostat1.xml", S_Unknown)
-vMap ( "camera",        0,  nil,                                             "D_DigitalSecurityCamera1.xml", S_Unknown)
+vMap ( "thermostat",   56,  "urn:upnp-org:serviceId:TemperatureSetpoint1",   "D_HVAC_ZoneThermostat1.xml", S_Unknown)
+vMap ( "camera",        0, "urn:micasaverde-com:serviceId:Camera1",          "D_DigitalSecurityCamera1.xml", S_Camera)
 vMap ( "combo",         0, "urn:micasaverde-com:serviceId:ComboDevice1",     "D_ComboDevice1.xml",       S_Unknown)
 vMap ( "door",         98, "urn:micasaverde-com:serviceId:DoorLock1",        "D_DoorLock1.xml",          S_DoorLock)
 
