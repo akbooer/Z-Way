@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 local ABOUT = {
   NAME          = "L_ZWay",
-  VERSION       = "2016.08.14",
+  VERSION       = "2016.08.17",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2016 AKBooer",
@@ -16,7 +16,7 @@ local http    = require "socket.http"
 local ltn12   = require "ltn12"
 
 
-local Z         -- the Zway object
+local Z         -- the Zway API object
 
 local service_update   -- table of service updaters indexed by altid
 
@@ -24,13 +24,22 @@ local service_update   -- table of service updaters indexed by altid
 
 local devNo
 
-local ACT = {}
-local DEV = {}
-local SID = {
+local service_schema = {}    -- serviceId ==> schema implementation
+
+local DEV = {
+    controller  = "D_SceneController1.xml", -- these preset devices don't correspond to and ZWay vDev
+    combo       = "D_ComboDevice1.xml",
+    rgb         = "D_DimmableRGBLight1.xml",
+
+  }
+local SID = {          -- schema implementation or shorthand name ==> serviceId
     AltUI   = "urn:upnp-org:serviceId:altui1",
-    Energy  = "urn:micasaverde-com:serviceId:EnergyMetering1",
     ZWave   = "urn:micasaverde-com:serviceId:ZWaveNetwork1",
     ZWay    = "urn:akbooer-com:serviceId:ZWay1",
+    
+    controller  = "urn:micasaverde-com:serviceId:SceneController1",
+    combo       = "urn:micasaverde-com:serviceId:ComboDevice1",
+    rgb         = "urn:micasaverde-com:serviceId:Color1",
   }
 
 -- LUUP utility functions 
@@ -88,134 +97,9 @@ end
 
 ----------------------------------------------------
 --
--- COMMAND CLASSES - virtual device updates
+-- SERVICE SCHEMAS - virtual services
+-- openLuup => Zway
 --
-
-local command_class = {
-  
-  -- catch-all
-  ["0"] = function (d, inst, meta)
-    
-    -- scene controller
-    if inst.deviceType == "toggleButton" then
-      local click = inst.updateTime
---      setVar ("LastUpdate_" .. meta.altid, click, SID.ZWay, d)
-      if click ~= meta.click then -- force variable updates
-        local scene = meta.scale
-        local time  = os.time()     -- "◷" == json.decode [["\u25F7"]]
-        local date  = os.date ("◷ %Y-%m-%d %H:%M:%S", time): gsub ("^0",'')
-        
-        luup.variable_set (SID.controller, "sl_SceneActivated", scene, d)
-        luup.variable_set (SID.controller, "LastSceneTime",time, d)
-        
-        if time then luup.variable_set (SID.AltUI, "DisplayLine1", date,  d) end
-        luup.variable_set (SID.AltUI, "DisplayLine2", "Last Scene: " .. scene, d)
-        
-        meta.click = click
-      end
-      
-    else
---        local message = "no update for device %d [%s] %s %s"
---        log (message: format (d, inst.id, inst.deviceType or '?', (inst.metrics or {}).icon or ''))
-      --...
-    end
-  end,
-
-  -- binary switch
-  ["37"] = function (d, inst, meta)
-      setVar ("Status",on_or_off (inst.metrics.level), meta.service, d)
-  end,
-
-  -- multilevel switch
-  ["38"] = function (d, inst, meta) 
-    local level = tonumber (inst.metrics.level) or 0
-    setVar ("LoadLevelTarget", level, meta.service, d)
-    setVar ("LoadLevelStatus", level, meta.service, d)
-    local status = (level > 0 and "1") or "0"
-    setVar ("Status", status, SID.switch, d)
-  end,
-  
-  -- binary sensor
-  ["48"] = function (d, inst)
-    local sid = SID.security
-    local tripped = on_or_off (inst.metrics.level)
-    local old = getVar ("Tripped", sid)
-    if tripped ~= old then
-      setVar ("Tripped", tripped, sid, d)
-      setVar ("LastTrip", inst.updateTime, sid, d)
-      local armed = getVar ("Armed", sid, d)
-      if armed == "1" then
-        setVar ("ArmedTripped", tripped, sid, d)
-      end
-    end
-  end,
-
-  -- multilevel sensor
-  ["49"] = function (d, inst, meta)
-    local name = {
-      [SID.temperature] = "CurrentTemperature",
-      [SID.energy] = "Watts",
-    }
-    local var = name[meta.service] or "CurrentLevel"
-    setVar (var, inst.metrics.level, meta.service, d)
-  end,
-
-  -- meter
-  ["50"] = function (d, inst, meta)
-    local var = (inst.metrics.scaleTitle or '?'): upper ()
-    if var then setVar (var, inst.metrics.level, meta.service, d) end
-  end,
-  
-  -- door lock
-  ["98"] = function (d, inst)
-      setVar ("Status",open_or_close (inst.metrics.level), SID.door, d)
-  end,
-
-  
-  -- battery
-  ["128"] = function (d, inst)
-    setVar ("BatteryLevel", inst.metrics.level, SID.hadevice, d)
-  end,
-
-}
-
---command_class["113"] = command_class["48"]      -- alarm
-command_class["102"] = command_class["98"]      -- barrier (garage door)
-    
-function command_class.new (dino, meta) 
-  local updater = command_class[meta.c_class] or command_class["0"]
-  return function (inst, ...) 
-      setVar (inst.id, inst.metrics.level, SID.ZWay, dino)    -- diagnostic, for the moment
-      -- call with deviceNo, instance object, and metadata (for persistent data)
-      return updater (dino, inst, meta, ...) 
-    end
-end
-
------------------------------------------
---
--- DEVICE status updates: ZWay => openLuup
---
-
-local D = {}    -- device structure simply for the HTTP callback diagnostic
-
-function _G.updateChildren (d)
-  D = d or Z.devices () or {}
-  for _,instance in pairs (D) do 
-    local altid = instance.id: match "^ZWayVDev_zway_.-([%w%-]+)$"
-    if altid and service_update [altid] then
-      service_update [altid] (instance)
-    end
-  end
-  luup.call_delay ("updateChildren", 2)
-end
-
-
-----------------------------------------------------
---
--- SERVICES - virtual services
---
-
-local services = {}
 
 --[[
 vDev commands:
@@ -226,7 +110,6 @@ vDev commands:
 --]]
 
 
--- urn:upnp-org:serviceId:SwitchPower1
 local S_SwitchPower = {
     
     SetTarget = function (d, args)
@@ -239,7 +122,6 @@ local S_SwitchPower = {
   }
 
 
--- urn:upnp-org:serviceId:Dimming1
 local S_Dimming = {
     
     SetLoadLevelTarget = function (d, args)
@@ -253,12 +135,11 @@ local S_Dimming = {
   }
 
 
--- urn:schemas-micasaverde-com:service:HaDevice:1
 local S_HaDevice = {
     
     ToggleState = function (d) 
       local toggle = {['0'] = '1', ['1']= '0'}
-      local status = getVar ("Status", SID.switch, d)
+      local status = getVar ("Status", SID[S_SwitchPower], d)
       S_SwitchPower.SetTarget (d, {newTargetValue = toggle [status] or '0'})
     end,
     
@@ -325,24 +206,164 @@ local S_Light     = { }
 local S_Humidity  = { }
 local S_Camera    = { }
 
-local S_EnergyMetering  = { }   -- urn:micasaverde-com:serviceId:EnergyMetering1
+local S_EnergyMetering  = { }
 local S_SceneController = { }
 local S_Unknown = { }   -- "catch-all" service
 
 
------------------------------------------
---
--- ACTION command callbacks: openLuup => Zway
---
+SID [S_Camera]          = "urn:micasaverde-com:serviceId:Camera1"
+SID [S_Color]           = "urn:micasaverde-com:serviceId:Color1"
+SID [S_Dimming]         = "urn:upnp-org:serviceId:Dimming1"
+SID [S_DoorLock]        = "urn:micasaverde-com:serviceId:DoorLock1"
+SID [S_EnergyMetering]  = "urn:micasaverde-com:serviceId:EnergyMetering1"
+SID [S_Generic]         = "urn:micasaverde-com:serviceId:GenericSensor1"
+SID [S_HaDevice]        = "urn:micasaverde-com:serviceId:HaDevice1"
+SID [S_Humidity]        = "urn:micasaverde-com:serviceId:HumiditySensor1"
+SID [S_Light]           = "urn:micasaverde-com:serviceId:LightSensor1"
+SID [S_Security]        = "urn:micasaverde-com:serviceId:SecuritySensor1"
+SID [S_SwitchPower]     = "urn:upnp-org:serviceId:SwitchPower1"
+SID [S_Temperature]     = "urn:upnp-org:serviceId:TemperatureSensor1"
+SID [S_Unknown]         = "urn:upnp-org:serviceId:TemperatureSetpoint1"
 
+
+for schema, sid in pairs (SID) do -- reverse looup-up  sid ==> schema
+  if type(schema) == "table" then service_schema[sid] = schema end
+end
+
+-- Generic ACTION callbacks
 local function generic_action (serviceId, action)
   local function noop(lul_device) 
     local message = "service/action not implemented: %d.%s.%s"
     log (message: format (lul_device, serviceId, action))
     return false
   end 
-  local service = services[serviceId] or {}
+  local service = service_schema[serviceId] or {}
   return { run = service [action] or noop }
+end
+
+
+----------------------------------------------------
+--
+-- COMMAND CLASSES - virtual device updates
+--
+
+local command_class = {
+  
+  -- catch-all
+  ["0"] = function (d, inst, meta)
+    
+    -- scene controller
+    if inst.deviceType == "toggleButton" then
+      local click = inst.updateTime
+--      setVar ("LastUpdate_" .. meta.altid, click, SID.ZWay, d)
+      if click ~= meta.click then -- force variable updates
+        local scene = meta.scale
+        local time  = os.time()     -- "◷" == json.decode [["\u25F7"]]
+        local date  = os.date ("◷ %Y-%m-%d %H:%M:%S", time): gsub ("^0",'')
+        
+        luup.variable_set (SID[S_SceneController], "sl_SceneActivated", scene, d)
+        luup.variable_set (SID[S_SceneController], "LastSceneTime",time, d)
+        
+        if time then luup.variable_set (SID.AltUI, "DisplayLine1", date,  d) end
+        luup.variable_set (SID.AltUI, "DisplayLine2", "Last Scene: " .. scene, d)
+        
+        meta.click = click
+      end
+      
+    else
+--        local message = "no update for device %d [%s] %s %s"
+--        log (message: format (d, inst.id, inst.deviceType or '?', (inst.metrics or {}).icon or ''))
+      --...
+    end
+  end,
+
+  -- binary switch
+  ["37"] = function (d, inst, meta)
+    setVar ("Status",on_or_off (inst.metrics.level), meta.service, d)
+  end,
+
+  -- multilevel switch
+  ["38"] = function (d, inst, meta) 
+    local level = tonumber (inst.metrics.level) or 0
+    setVar ("LoadLevelTarget", level, meta.service, d)
+    setVar ("LoadLevelStatus", level, meta.service, d)
+    local status = (level > 0 and "1") or "0"
+    setVar ("Status", status, SID[S_SwitchPower], d)
+  end,
+  
+  -- binary sensor
+  ["48"] = function (d, inst)
+    local sid = SID [S_Security]
+    local tripped = on_or_off (inst.metrics.level)
+    local old = getVar ("Tripped", sid)
+    if tripped ~= old then
+      setVar ("Tripped", tripped, sid, d)
+      setVar ("LastTrip", inst.updateTime, sid, d)
+      local armed = getVar ("Armed", sid, d)
+      if armed == "1" then
+        setVar ("ArmedTripped", tripped, sid, d)
+      end
+    end
+  end,
+
+  -- multilevel sensor
+  ["49"] = function (d, inst, meta)   -- TODO: more to do here to sub-type?
+    local sensor_variable_name = {
+      [SID[S_Temperature]]    = "CurrentTemperature",
+      [SID[S_EnergyMetering]] = "Watts",
+    }
+    local var = sensor_variable_name[meta.service] or "CurrentLevel"
+    setVar (var, inst.metrics.level, meta.service, d)
+  end,
+
+  -- meter
+  ["50"] = function (d, inst, meta)
+    local var = (inst.metrics.scaleTitle or '?'): upper ()
+    if var then setVar (var, inst.metrics.level, meta.service, d) end
+  end,
+  
+  -- door lock
+  ["98"] = function (d, inst)
+      setVar ("Status",open_or_close (inst.metrics.level), SID[S_DoorLock], d)
+  end,
+
+  
+  -- battery
+  ["128"] = function (d, inst)
+    setVar ("BatteryLevel", inst.metrics.level, SID[S_HaDevice], d)
+  end,
+
+}
+
+--command_class["113"] = command_class["48"]      -- alarm
+command_class["102"] = command_class["98"]      -- barrier (garage door)
+    
+function command_class.new (dino, meta) 
+  local updater = command_class[meta.c_class] or command_class["0"]
+  return function (inst, ...) 
+      setVar (inst.id, inst.metrics.level, SID.ZWay, dino)    -- diagnostic, for the moment
+      setVar (inst.id .. "_LastUpdate", inst.updateTime, SID.ZWay, dino)    -- diagnostic, for the moment
+      -- call with deviceNo, instance object, and metadata (for persistent data)
+      return updater (dino, inst, meta, ...) 
+    end
+end
+
+-----------------------------------------
+--
+-- DEVICE status updates: ZWay => openLuup
+--
+
+local D = {}    -- device structure simply for the HTTP callback diagnostic
+
+function _G.updateChildren (d)
+  D = d or Z.devices () or {}
+  for _,instance in pairs (D) do 
+    local altid = instance.id: match "^ZWayVDev_zway_.-([%w%-]+)$"
+    if altid and service_update [altid] then
+      service_update [altid] (instance)
+    end
+  end
+  luup.call_delay ("updateChildren", 2)
 end
 
 
@@ -355,42 +376,202 @@ end
 -- ...and from the service files, the actions and variables.
 --
 
-local function vMap (name, _, sid, dev, act)
-  ACT[name] = act
-  DEV[name] = dev
-  SID[name] = sid
-  if sid and act then services[sid] = act end
-end
-  
--- TODO: JSON files for sub-types ?
--- D_UVSensor.json
--- D_LeakSensor1.json
--- D_SmokeCoSensor1.json"
 
-vMap ( "multilevel",   38, "urn:upnp-org:serviceId:Dimming1",                "D_DimmableLight1.xml",     S_Dimming)
-vMap ( "ultraviolet",  49, "urn:micasaverde-com:serviceId:LightSensor1",     "D_LightSensor1.xml",       S_Generic)
-vMap ( "hadevice",      0, "urn:micasaverde-com:serviceId:HaDevice1",        "D_ComboDevice1.xml",       S_HaDevice)        
-vMap ( "humidity",     49, "urn:micasaverde-com:serviceId:HumiditySensor1",  "D_HumiditySensor1.xml",    S_Humidity)
-vMap ( "luminosity",   49, "urn:micasaverde-com:serviceId:LightSensor1",     "D_LightSensor1.xml",       S_Light)
-vMap ( "security",     48, "urn:micasaverde-com:serviceId:SecuritySensor1",  "D_MotionSensor1.xml",      S_Security)
-vMap ( "motion",       48, "urn:micasaverde-com:serviceId:SecuritySensor1",  "D_MotionSensor1.xml",      S_Security)
-vMap ( "smoke",        48, "urn:micasaverde-com:serviceId:SecuritySensor1",  "D_SmokeSensor1.xml",       S_Security)
-vMap ( "switch",       37, "urn:upnp-org:serviceId:SwitchPower1",            "D_BinaryLight1.xml",       S_SwitchPower)
-vMap ( "temperature",  49, "urn:upnp-org:serviceId:TemperatureSensor1",      "D_TemperatureSensor1.xml", S_Temperature)
-vMap ( "switchRGBW",    0, "urn:micasaverde-com:serviceId:Color1",           "D_DimmableRGBLight1.xml",  S_Color)
-vMap ( "controller",    0, "urn:micasaverde-com:serviceId:SceneController1", "D_SceneController1.xml",   S_SceneController)
-vMap ( "thermostat",   56, "urn:upnp-org:serviceId:TemperatureSetpoint1",    "D_HVAC_ZoneThermostat1.xml", S_Unknown)
-vMap ( "camera",        0, "urn:micasaverde-com:serviceId:Camera1",          "D_DigitalSecurityCamera1.xml", S_Camera)
-vMap ( "combo",         0, "urn:micasaverde-com:serviceId:ComboDevice1",     "D_ComboDevice1.xml",       S_Unknown)
-vMap ( "door",         98, "urn:micasaverde-com:serviceId:DoorLock1",        "D_DoorLock1.xml",          S_DoorLock)
+-- c_class, {upnp_file, serviceId, json_file}, [scale = {...}] }
+local vMap = {
+  ["0"]  = { nil, S_HaDevice },   -- not really a NO_OP, but a "catch-all"
+  
+  ["37"] = { "D_BinaryLight1.xml",      S_SwitchPower       },
+  ["38"] = { "D_DimmableLight1.xml",    S_Dimming },
+  ["48"] = { "D_MotionSensor1.xml",     S_Security ,        -- Binary Sensors
+    scale = {
+--  1	"General purpose"
+--	2	"Smoke"     -- "D_SmokeSensor1.xml"
+--	3	"CO"        -- "D_SmokeCoSensor1.json"
+--	4	"CO2"
+--	5	"Heat"
+        ["6"] = { nil, nil, "D_LeakSensor1.json" }, --	6	"Water"
+--	7	"Freeze"
+--	8	"Tamper"
+--	9	"Aux"
+        ["10"] = { "D_DoorSensor1.xml" }, --	10	"Door/Window"
+--	11	"Tilt"
+--	12	"Motion"
+--	13	"Glass Break"
+--	14	"First supported Sensor Type"
+--]]    
+    }},
+  ["49"] = {  -- no default device or service
+    scale = {
+      ["1"]  = { "D_TemperatureSensor1.xml",  S_Temperature },
+      ["2"]  = { "D_GenericSensor1.xml",      S_Generic },
+      ["3"]  = { "D_LightSensor1.xml",        S_Light},
+      ["4"]  = { nil,       S_EnergyMetering},
+      ["5"]  = { "D_HumiditySensor1.xml",     S_Humidity},
+      ["27"] = { "D_LightSensor1.xml",        S_Light,           "D_UVSensor.json" }    -- special .json file for icon
+    }},
+  --[[
+ SensorMultilevel
+	1	"Temperature"
+		scale 0	"&#176;C"
+		scale 1	"&#176;F"
+	2	"Generic"
+		scale 0	""
+		scale 1	"%"
+	3	"Luminiscence"
+		scale 0	"%"
+		scale 1	"Lux"
+	4	"Power"
+		scale 0	"W"
+		scale 1	"Btu/h"
+	5	"Humidity"
+		scale 0	"%"
+		scale 1	"Absolute humidity"
+	6	"Velocity"
+		scale 0	"m/s"
+		scale 1	"mph"
+	7	"Direction"
+	8	"Athmospheric Pressure"
+		scale 0	"kPa"
+		scale 1	"inch Mercury"
+	9	"Barometric Pressure"
+		scale 0	"kPa"
+		scale 1	"inch Mercury"
+	10	"Solar Radiation"
+	11	"Dew Point"
+		scale 0	"&#176;C"
+		scale 1	"&#176;F"
+	12	"Rain Rate"
+		scale 0	"mm/h"
+		scale 1	"inch/h"
+	13	"Tide Level"
+		scale 0	"m"
+		scale 1	"feet"
+	14	"Weigth"
+		scale 0	"kg"
+		scale 1	"pounds"
+	15	"Voltage"
+		scale 0	"V"
+		scale 1	"mV"
+	16	"Current"
+		scale 0	"A"
+		scale 1	"mA"
+	17	"CO2 Level"
+	18	"Air Flow"
+		scale 0	"m3/h"
+		scale 1	"cfm"
+	19	"Tank Capacity"
+		scale 0	"l"
+		scale 1	"cbm"
+		scale 2	"gallons"
+	20	"Distance"
+		scale 0	"m"
+		scale 1	"cm"
+		scale 2	"Feet"
+	21	"Angle Position"
+		scale 0	"%"
+		scale 1	"Degree to North Pole"
+		scale 2	"Degree to South Pole"
+	22	"Rotation"
+		scale 0	"rpm"
+		scale 1	"Hz"
+	23	"Water temperature"
+		scale 0	"&#176;C"
+		scale 1	"&#176;F"
+	24	"Soil temperature"
+		scale 0	"&#176;C"
+		scale 1	"&#176;F"
+	25	"Seismic intensity"
+		scale 0	"Mercalli"
+		scale 1	"European Macroseismic"
+		scale 2	"Liedu"
+		scale 3	"Shindo"
+	26	"Seismic magnitude"
+		scale 0	"Local"
+		scale 1	"Moment"
+		scale 2	"Surface wave"
+		scale 3	"Body wave"
+	27	"Ultraviolet"
+	28	"Electrical resistivity"
+	29	"Electrical conductivity"
+	30	"Loudness"
+		scale 0	"Absolute loudness (dB)"
+		scale 1	"A-weighted decibels (dBA)"
+	31	"Moisture"
+		scale 0	"%"
+		scale 1	"Volume water content (m3/m3)"
+		scale 2	"Impedance (kΩ)"
+		scale 3	"Water activity (aw)"
+	32	"Frequency"
+		scale 0	"Hz"
+		scale 1	"kHz"
+	33	"Time"
+	34	"Target Temperature"
+		scale 0	"&#176;C"
+		scale 1	"&#176;F"
+	35	"Particulate Matter"
+		scale 0	"mol/m3"
+		scale 1	"μg/m3"
+	36	"Formaldehyde (CH2O)"
+	37	"Radon Concentration"
+		scale 0	"bq/m3"
+		scale 1	"pCi/L"
+	38	"Methane Density (CH4)"
+	39	"Volatile Organic Compound (VOC)"
+	40	"Carbon Monoxide (CO)"
+	41	"Soil Humidity"
+	42	"Soil Reactivity"
+	43	"Soil Salinity"
+	44	"Heart Rate"
+	45	"Blood Pressure"
+		scale 0	"Systolic (mmHg)"
+		scale 1	"Diastolic (mmHg)"
+	46	"Muscle Mass"
+	47	"Fat Mass"
+	48	"Bone Mass"
+	49	"Total Body Water"
+	50	"Basic Metabolic Rate"
+	51	"Body Mass Index"
+	52	"Acceleration￼X-axis"
+	53	"Acceleration￼Y-axis"
+	54	"Acceleration￼Z-axis"
+	55	"Smoke Density"
+
+  --]]
+  ["50"] = { nil, S_EnergyMetering },   -- device is "D_PowerMeter1.xml"
+--[[
+ Meter
+	1	"Electric"
+		scale 0	"kWh"
+		scale 1	"kVAh"
+		scale 2	"W"
+		scale 3	"Pulse Count"
+		scale 4	"V"
+		scale 5	"A"
+		scale 6	"Power Factor"
+	2	"Gas"
+		scale 0	"Qubic meter"
+		scale 1	"Cubic feet"
+		scale 2	"reserved"
+		scale 3	"Pulse Count"
+	3	"Water"
+		scale 0	"Cubic meter"
+		scale 1	"Cubic feet"
+		scale 2	"US Gallon"
+		scale 3	"Pulse Count"
+--]]
+  ["56"] = { "D_HVAC_ZoneThermostat1.xml" },
+  ["98"] = { "D_DoorLock1.xml",   S_DoorLock },
+  
+  ["113"] = { "D_MotionSensor1.xml", S_Security },
+  ["128"] = { nil, S_EnergyMetering },
+  ["152"] = { "D_MotionSensor1.xml", S_Security },
+  ["156"] = { nil, S_Security },    -- Tamper switch ?
+
 
 -- D_Siren1.xml
--- D_SmokeSensor1.xml"
-
-vMap ( "generic",      49, "urn:micasaverde-com:serviceId:GenericSensor1",   nil,     S_Generic)
-vMap ( "battery",     128, "urn:micasaverde-com:serviceId:HaDevice1",         nil,                       S_HaDevice)
-vMap ( "energy",       50, "urn:micasaverde-com:serviceId:EnergyMetering1",    nil,                      S_EnergyMetering)
---vMap ( "meter",       50, "urn:micasaverde-com:serviceId:EnergyMetering1",    "D_PowerMeter1.xml",     S_EnergyMetering)
+-- D_SmokeSensor1.xml
+}
 
 
 --[[
@@ -419,64 +600,6 @@ instance = {
 
 --]]
 
---[[
-
-  -- icon types
-  
-  defaults.metrics.icon = "motion";
-  defaults.metrics.icon = "smoke";
-  defaults.metrics.icon = "co";
-  defaults.metrics.icon = "flood";
-  defaults.metrics.icon = "cooling";
-  defaults.metrics.icon = "door";
-  defaults.metrics.icon = "motion";
-  defaults.metrics.icon = "temperature";
-  defaults.metrics.icon = "luminosity";
-  defaults.metrics.icon = "energy";
-  defaults.metrics.icon = "humidity";
-  defaults.metrics.icon = "barometer";
-  defaults.metrics.icon = "ultraviolet";
-  
-  a_defaults.metrics.icon = 'door';
-  a_defaults.metrics.icon = 'smoke';
-  a_defaults.metrics.icon = 'co';
-  a_defaults.metrics.icon = 'alarm';
-  a_defaults.metrics.icon = 'flood';
-
---]]
-
-
---[[
-
-All Widgets belong to one specific type. At the moment the following types are defined and supported by the Z-Way-HA UI:
-– sensorBinary: A binary sensor, only showing on or off
-– sensorMultilevel: The type, the value and the scale of the sensor are shown
-– switchBinary: The device can be switched on and off
-– switchMultilevel: The device can be switched on and off plus set to any percentage level between 0 % and 100 %.
-– switchRGBW: This device allows setting RGB colors
-– switchControl:
-– toggleButton: The device can only be turned on. This is for scene activation.
-– thermostat: The thermostat shows the setpoint temperature plus a drop down list of thermostat modes if available
-– battery: The battery widget just shows the percentage of charging capacity left
-– camera: A camera will show the image and can be operated
-– fan: A fan can be turned on and off
-
---]]
-
-
-local wMap = {
-  sensorBinary      = "security",
-  sensorMultilevel  = "generic",
-  switchBinary      = "switch",
-  switchMultilevel  = "multilevel",
-  switchRGBW        = "switchRGBW",
-  switchControl     = "switch",
-  toggleButton      = "controller",
-  thermostat        = "thermostat",
-  battery           = "battery",
-  camera            = "camera",
-  fan               = nil,
-}
 
 
 --[[
@@ -491,28 +614,41 @@ that supports multiple sensors with different scales in one single command class
 
 --]]
 
-local NICS_pattern = "^(%d+)%-(%d+)%-(%d+)%-?(%d*)%-?(.-)%-?(%a*)$"
+local NICS_pattern = "^(%d+)%-(%d+)%-(%d+)%-?(%d*)%-?(%d*)%-?(%d*)%-?(.-)$"
 
 -- create metadata for each virtual device instance
 local function vDev_meta (v)
   local altid = v.id: match "([%-%w]+)$"
-  local node, instance, c_class, scale, other, char = altid: match (NICS_pattern)
-  local met = v.metrics or {}
-  local itype = met.icon
-  local dtype = wMap[v.deviceType]
+  local node, instance, c_class, scale, sub_class, sub_scale, tail = altid: match (NICS_pattern)
   local N = tonumber (c_class) or 0
+    
+  local x = vMap[c_class] or {}
+  local y = (x.scale or {})[scale] or {}
+  local z = setmetatable (y, {__index = x})
+  
+  local upnp_file = (0 < N and N < 128) and z[1] 
+  local service   = SID[z[2]]
+  local json_file = z[3]
+  
+  local devtype = (json_file or upnp_file or ''): match "^D_(%u+%l*)"
+  if devtype then devtype = devtype: lower () end
+
   return {
-    device    = command_class[c_class] and (0 < N and N < 128) and (DEV[itype] or DEV[dtype]),
-    service   = SID[itype] or SID[dtype] or SID.generic,
+    upnp_file = upnp_file,
+    service   = service,
+    json_file = json_file,
+    devtype   = devtype,
     altid     = altid,
     node      = node,
     instance  = instance,
     c_class   = c_class,
     scale     = scale,
-    other     = other,
-    char      = char,
+    sub_class = sub_class,
+    sub_scale = sub_scale,
+    tail      = tail,
   }
 end
+
 
 
 -- transform each node into some sort of Luup device structure with parents and children
@@ -522,8 +658,8 @@ local function luupDevice (node, instances)
   local dev, var = {}, {}
   local children = {}         -- count of children indexed by (shorthand) device type
   for _, v in ipairs (instances) do
-    if v.meta.device then
-      local t= v.meta.device: match "^D_(%a%l+)"
+    local t = v.meta.devtype
+    if t then
       children[t] = (children[t] or 0) + 1
       dev[#dev+1] = v
     else
@@ -533,29 +669,32 @@ local function luupDevice (node, instances)
       
   -- create top-level device: three different sorts:
   local Ndev = #dev
-  local upnp_file, altid, dtype, parameters
+  local upnp_file, altid, devtype, parameters
   
+  ------------------------
   -- a controller has no devices and is just a collection of buttons and switches or other services 
   if Ndev == 0 then
-    upnp_file, altid, dtype = DEV.controller, var[1].meta.node, "controller"
+    upnp_file, altid, devtype = DEV.controller, var[1].meta.node, "controller"
     local txt = [[Define scene triggers to watch sl_SceneActivated]] ..
                 [[ with Lua Expression: new == "button_number"]]
     parameters = table.concat { SID.controller, ',', "Scenes", '=', txt }
     
+  ------------------------
   -- a singleton device is a node with only one vDev device
   elseif Ndev == 1 then
-    upnp_file, altid = dev[1].meta.device, dev[1].meta.altid 
+    upnp_file, altid = dev[1].meta.upnp_file, dev[1].meta.altid 
     
+  ------------------------
   -- a combo device is a collection of more than one vDev device, and may have service variables
   else
-    upnp_file, altid, dtype = DEV.combo, dev[1].meta.node, " combo"  -- (the space is important)
+    upnp_file, altid, devtype = DEV.combo, dev[1].meta.node, " combo"  -- (the space is important)
     
     -- HOWEVER... if there are lots of dimmers, assume it's an RGB(W) combo
  
-    local dimmers = children.Dimmable
+    local dimmers = children.dimmable
     if dimmers and dimmers > 3 then     -- ... we'll asume that it's an RGB(W) switch
-      dtype = " RGB" 
-      upnp_file = DEV.switchRGBW
+      devtype = " RGB controller" 
+      upnp_file = DEV.rgb
       
     else                                -- just a vanilla combination device
       local label = {}
@@ -568,10 +707,9 @@ local function luupDevice (node, instances)
   end
   
   -- return structure with info for creating the top-level device
-  local m = (dev[1] or var[1]).metrics
---  local alias = {smoke = "alarm"}  TODO: alias for 'smoke' alarms
-  dtype = dtype or m.icon or '?'
-  local name = ("%3s: %s %s"): format (node, m.title: match "%w+", dtype) 
+  local dv = (dev[1] or var[1])
+  devtype = devtype or dv.meta.devtype or '?'
+  local name = ("%3s: %s %s"): format (node, dv.metrics.title: match "%w+", devtype) 
   
   return { 
     upnp_file = upnp_file,
@@ -584,7 +722,6 @@ local function luupDevice (node, instances)
   } 
 
 end
-
 
 -- index virtual devices number by node number and build instance metadata
 local function index_nodes (d)
@@ -640,15 +777,16 @@ local function parameter_list (upnp_file)
   return parameters
 end
 
-local function appendZwayDevice (lul_device, handle, name, altid, upnp_file, extra)
+local function appendZwayDevice (lul_device, handle, name, altid, upnp_file, json_file, extra)
   local parameters = parameter_list (upnp_file)
   parameters = table.concat ({parameters, extra}, '\n')
   luup.chdev.append (
     lul_device, handle,   -- parent device and handle
-    altid, name, 				  -- id and description
+    altid, name, 				   -- id and description
     nil,                  -- device type
     upnp_file, nil,       -- device filename and implementation filename
     parameters  				   -- parameters: "service,variable=value\nservice..."
+    -- TODO: json_file ??
   )
 end
 
@@ -666,7 +804,7 @@ local function syncChildren(devNo, devices)
     
   local handle = luup.chdev.start(devNo);
 	for _, ldv in ipairs(luupDevs) do
-    appendZwayDevice (devNo, handle, ldv.name, ldv.altid, ldv.upnp_file, ldv.parameters)
+    appendZwayDevice (devNo, handle, ldv.name, ldv.altid, ldv.upnp_file, ldv.json_file, ldv.parameters)
 	end
 	local reload = luup.chdev.sync(devNo, handle, no_reload)   -- sync all the top-level devices
 
@@ -688,17 +826,16 @@ local function syncChildren(devNo, devices)
       local this = luupDevs[node]
       for _, instance in ipairs (this.devices) do
         local m = instance.meta
-        if m.device then
+        if m.upnp_file then
           if m.altid == dev.id then                         -- don't create duplicate device!
             updater[m.altid] = command_class.new (dino, m)  -- just create its updater
           else
             local title = "%3s: %s %s %s"
             local metrics = instance.metrics
-            local scale = m.scale
-            local suffix = table.concat ({m.instance, (scale ~= '') and scale or nil}, '.')
-            local name = title: format (node, metrics.title: match "%w+",  metrics.icon or '?', suffix)
+            local suffix = m.instance ~= '0' and m.instance or ''
+            local name = title: format (node, metrics.title: match "%w+",  m.devtype or '?', suffix)
             updater[m.altid] = m
-            appendZwayDevice (dino, handle, name, m.altid, m.device)
+            appendZwayDevice (dino, handle, name, m.altid, m.upnp_file, m.json_file)
           end
         end
       end
