@@ -201,14 +201,13 @@ local S_DoorLock = {
  
 }
 
-local S_Generic   = { }
-local S_Light     = { }
-local S_Humidity  = { }
-local S_Camera    = { }
-
+local S_Camera          = { }
 local S_EnergyMetering  = { }
+local S_Generic         = { }
+local S_Humidity        = { }
+local S_Light           = { }
 local S_SceneController = { }
-local S_Unknown = { }   -- "catch-all" service
+local S_Unknown         = { }   -- "catch-all" service
 
 
 SID [S_Camera]          = "urn:micasaverde-com:serviceId:Camera1"
@@ -383,7 +382,7 @@ local vMap = {
   
   ["37"] = { "D_BinaryLight1.xml",      S_SwitchPower       },
   ["38"] = { "D_DimmableLight1.xml",    S_Dimming },
-  ["48"] = { "D_MotionSensor1.xml",     S_Security ,        -- Binary Sensors
+  ["48"] = { "D_MotionSensor1.xml",     S_Security ,        -- SensorBinary
     scale = {
 --  1	"General purpose"
 --	2	"Smoke"     -- "D_SmokeSensor1.xml"
@@ -401,7 +400,7 @@ local vMap = {
 --	14	"First supported Sensor Type"
 --]]    
     }},
-  ["49"] = {  -- no default device or service
+  ["49"] = {  -- SensorMultilevel: no default device or service
     scale = {
       ["1"]  = { "D_TemperatureSensor1.xml",  S_Temperature },
       ["2"]  = { "D_GenericSensor1.xml",      S_Generic },
@@ -411,155 +410,71 @@ local vMap = {
       ["27"] = { "D_LightSensor1.xml",        S_Light,           "D_UVSensor.json" }    -- special .json file for icon
     }},
   --[[
- SensorMultilevel
-	1	"Temperature"
-		scale 0	"&#176;C"
-		scale 1	"&#176;F"
-	2	"Generic"
-		scale 0	""
-		scale 1	"%"
-	3	"Luminiscence"
-		scale 0	"%"
-		scale 1	"Lux"
-	4	"Power"
-		scale 0	"W"
-		scale 1	"Btu/h"
-	5	"Humidity"
-		scale 0	"%"
-		scale 1	"Absolute humidity"
-	6	"Velocity"
-		scale 0	"m/s"
-		scale 1	"mph"
-	7	"Direction"
-	8	"Athmospheric Pressure"
-		scale 0	"kPa"
-		scale 1	"inch Mercury"
-	9	"Barometric Pressure"
-		scale 0	"kPa"
-		scale 1	"inch Mercury"
-	10	"Solar Radiation"
-	11	"Dew Point"
-		scale 0	"&#176;C"
-		scale 1	"&#176;F"
-	12	"Rain Rate"
-		scale 0	"mm/h"
-		scale 1	"inch/h"
-	13	"Tide Level"
-		scale 0	"m"
-		scale 1	"feet"
-	14	"Weigth"
-		scale 0	"kg"
-		scale 1	"pounds"
-	15	"Voltage"
-		scale 0	"V"
-		scale 1	"mV"
-	16	"Current"
-		scale 0	"A"
-		scale 1	"mA"
-	17	"CO2 Level"
-	18	"Air Flow"
-		scale 0	"m3/h"
-		scale 1	"cfm"
-	19	"Tank Capacity"
-		scale 0	"l"
-		scale 1	"cbm"
-		scale 2	"gallons"
-	20	"Distance"
-		scale 0	"m"
-		scale 1	"cm"
-		scale 2	"Feet"
-	21	"Angle Position"
-		scale 0	"%"
-		scale 1	"Degree to North Pole"
-		scale 2	"Degree to South Pole"
-	22	"Rotation"
-		scale 0	"rpm"
-		scale 1	"Hz"
-	23	"Water temperature"
-		scale 0	"&#176;C"
-		scale 1	"&#176;F"
-	24	"Soil temperature"
-		scale 0	"&#176;C"
-		scale 1	"&#176;F"
-	25	"Seismic intensity"
-		scale 0	"Mercalli"
-		scale 1	"European Macroseismic"
-		scale 2	"Liedu"
-		scale 3	"Shindo"
-	26	"Seismic magnitude"
-		scale 0	"Local"
-		scale 1	"Moment"
-		scale 2	"Surface wave"
-		scale 3	"Body wave"
-	27	"Ultraviolet"
-	28	"Electrical resistivity"
-	29	"Electrical conductivity"
-	30	"Loudness"
-		scale 0	"Absolute loudness (dB)"
-		scale 1	"A-weighted decibels (dBA)"
-	31	"Moisture"
-		scale 0	"%"
-		scale 1	"Volume water content (m3/m3)"
-		scale 2	"Impedance (kΩ)"
-		scale 3	"Water activity (aw)"
-	32	"Frequency"
-		scale 0	"Hz"
-		scale 1	"kHz"
-	33	"Time"
-	34	"Target Temperature"
-		scale 0	"&#176;C"
-		scale 1	"&#176;F"
-	35	"Particulate Matter"
-		scale 0	"mol/m3"
-		scale 1	"μg/m3"
-	36	"Formaldehyde (CH2O)"
-	37	"Radon Concentration"
-		scale 0	"bq/m3"
-		scale 1	"pCi/L"
-	38	"Methane Density (CH4)"
-	39	"Volatile Organic Compound (VOC)"
-	40	"Carbon Monoxide (CO)"
-	41	"Soil Humidity"
-	42	"Soil Reactivity"
-	43	"Soil Salinity"
-	44	"Heart Rate"
-	45	"Blood Pressure"
-		scale 0	"Systolic (mmHg)"
-		scale 1	"Diastolic (mmHg)"
-	46	"Muscle Mass"
-	47	"Fat Mass"
-	48	"Bone Mass"
-	49	"Total Body Water"
-	50	"Basic Metabolic Rate"
-	51	"Body Mass Index"
-	52	"Acceleration￼X-axis"
-	53	"Acceleration￼Y-axis"
-	54	"Acceleration￼Z-axis"
-	55	"Smoke Density"
-
+ 
+SensorMultilevel
+	1	"Temperature"	 - scale: {"C","F"}
+	2	"Generic"	 - scale: {"","%"}
+	3	"Luminiscence"	 - scale: {"%","Lux"}
+	4	"Power"	 - scale: {"W","Btu/h"}
+	5	"Humidity"	 - scale: {"%","Absolute humidity"}
+	6	"Velocity"	 - scale: {"m/s","mph"}
+	7	"Direction"	
+	8	"Athmospheric Pressure"	 - scale: {"kPa","inch Mercury"}
+	9	"Barometric Pressure"	 - scale: {"kPa","inch Mercury"}
+	10	"Solar Radiation"	
+	11	"Dew Point"	 - scale: {"C","F"}
+	12	"Rain Rate"	 - scale: {"mm/h","inch/h"}
+	13	"Tide Level"	 - scale: {"m","feet"}
+	14	"Weigth"	 - scale: {"kg","pounds"}
+	15	"Voltage"	 - scale: {"V","mV"}
+	16	"Current"	 - scale: {"A","mA"}
+	17	"CO2 Level"	
+	18	"Air Flow"	 - scale: {"m3/h","cfm"}
+	19	"Tank Capacity"	 - scale: {"l","cbm","gallons"}
+	20	"Distance"	 - scale: {"m","cm","Feet"}
+	21	"Angle Position"	 - scale: {"%","Degree to North Pole","Degree to South Pole"}
+	22	"Rotation"	 - scale: {"rpm","Hz"}
+	23	"Water temperature"	 - scale: {"C","F"}
+	24	"Soil temperature"	 - scale: {"C","F"}
+	25	"Seismic intensity"	 - scale: {"Mercalli","European Macroseismic","Liedu","Shindo"}
+	26	"Seismic magnitude"	 - scale: {"Local","Moment","Surface wave","Body wave"}
+	27	"Ultraviolet"	
+	28	"Electrical resistivity"	
+	29	"Electrical conductivity"	
+	30	"Loudness"	 - scale: {"Absolute loudness (dB)","A-weighted decibels (dBA)"}
+	31	"Moisture"	 - scale: {"%","Volume water content (m3/m3)","Impedance (kΩ)","Water activity (aw)"}
+	32	"Frequency"	 - scale: {"Hz","kHz"}
+	33	"Time"	
+	34	"Target Temperature"	 - scale: {"C","F"}
+	35	"Particulate Matter"	 - scale: {"mol/m3","μg/m3"}
+	36	"Formaldehyde (CH2O)"	
+	37	"Radon Concentration"	 - scale: {"bq/m3","pCi/L"}
+	38	"Methane Density (CH4)"	
+	39	"Volatile Organic Compound (VOC)"	
+	40	"Carbon Monoxide (CO)"	
+	41	"Soil Humidity"	
+	42	"Soil Reactivity"	
+	43	"Soil Salinity"	
+	44	"Heart Rate"	
+	45	"Blood Pressure"	 - scale: {"Systolic (mmHg)","Diastolic (mmHg)"}
+	46	"Muscle Mass"	
+	47	"Fat Mass"	
+	48	"Bone Mass"	
+	49	"Total Body Water"	
+	50	"Basic Metabolic Rate"	
+	51	"Body Mass Index"	
+	52	"Acceleration￼X-axis"	
+	53	"Acceleration￼Y-axis"	
+	54	"Acceleration￼Z-axis"	
+	55	"Smoke Density"	
   --]]
   ["50"] = { nil, S_EnergyMetering },   -- device is "D_PowerMeter1.xml"
---[[
- Meter
-	1	"Electric"
-		scale 0	"kWh"
-		scale 1	"kVAh"
-		scale 2	"W"
-		scale 3	"Pulse Count"
-		scale 4	"V"
-		scale 5	"A"
-		scale 6	"Power Factor"
-	2	"Gas"
-		scale 0	"Qubic meter"
-		scale 1	"Cubic feet"
-		scale 2	"reserved"
-		scale 3	"Pulse Count"
-	3	"Water"
-		scale 0	"Cubic meter"
-		scale 1	"Cubic feet"
-		scale 2	"US Gallon"
-		scale 3	"Pulse Count"
---]]
+  --[[
+  Meter
+    1	"Electric"	 - scale: {"kWh","kVAh","W","Pulse Count","V","A","Power Factor"}
+    2	"Gas"	 - scale: {"Cubic meter","Cubic feet","reserved","Pulse Count"}
+    3	"Water"	 - scale: {"Cubic meter","Cubic feet","US Gallon","Pulse Count"}
+  --]]
   ["56"] = { "D_HVAC_ZoneThermostat1.xml" },
   ["98"] = { "D_DoorLock1.xml",   S_DoorLock },
   
