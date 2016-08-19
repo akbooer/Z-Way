@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 local ABOUT = {
   NAME          = "L_ZWay",
-  VERSION       = "2016.08.19",
+  VERSION       = "2016.08.19b",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2016 AKBooer",
@@ -18,7 +18,7 @@ local ltn12   = require "ltn12"
 
 local Z         -- the Zway API object
 
-local service_update   -- table of service updaters indexed by altid
+local cclass_update   -- table of command_class updaters indexed by altid
 
 ------------------
 
@@ -366,8 +366,8 @@ function _G.updateChildren (d)
   D = d or Z.devices () or {}
   for _,instance in pairs (D) do 
     local altid = instance.id: match "^ZWayVDev_zway_.-([%w%-]+)$"
-    if altid and service_update [altid] then
-      service_update [altid] (instance)
+    if altid and cclass_update [altid] then
+      cclass_update [altid] (instance)
     end
   end
   luup.call_delay ("updateChildren", 2)
@@ -411,7 +411,7 @@ local vMap = {
   ["49"] = {  -- SensorMultilevel: no default device or service
     scale = {
       ["1"]  = { "D_TemperatureSensor1.xml",  S_Temperature },
-      ["2"]  = { "D_GenericSensor1.xml",      S_Generic },
+      ["2"]  = { nil,      S_Generic },
       ["3"]  = { "D_LightSensor1.xml",        S_Light},
       ["4"]  = { nil,       S_EnergyMetering},
       ["5"]  = { "D_HumiditySensor1.xml",     S_Humidity},
@@ -894,7 +894,7 @@ function init(devNo)
     luup.register_handler (handler, 'z' .. devNo)
     
     local vDevs = Z.devices ()
-    service_update = syncChildren (devNo, vDevs)
+    cclass_update = syncChildren (devNo, vDevs)
     _G.updateChildren (vDevs)
   
   else
