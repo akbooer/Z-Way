@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 local ABOUT = {
   NAME          = "L_ZWay",
-  VERSION       = "2016.08.17",
+  VERSION       = "2016.08.19",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2016 AKBooer",
@@ -327,6 +327,16 @@ local command_class = {
   end,
 
   
+  -- barrier operator (eg. garage door)
+  ["102"] = function (d, inst)
+      setVar ("Status",open_or_close (inst.metrics.level), SID[S_DoorLock], d)
+  end,
+ 
+  -- alarm
+  ["113"] = function (d, inst)
+    command_class ["48"] (d, inst)
+  end,
+ 
   -- battery
   ["128"] = function (d, inst)
     setVar ("BatteryLevel", inst.metrics.level, SID[S_HaDevice], d)
@@ -334,8 +344,6 @@ local command_class = {
 
 }
 
---command_class["113"] = command_class["48"]      -- alarm
-command_class["102"] = command_class["98"]      -- barrier (garage door)
     
 function command_class.new (dino, meta) 
   local updater = command_class[meta.c_class] or command_class["0"]
@@ -478,7 +486,8 @@ SensorMultilevel
   ["56"] = { "D_HVAC_ZoneThermostat1.xml" },
   ["98"] = { "D_DoorLock1.xml",   S_DoorLock },
   
-  ["113"] = { "D_MotionSensor1.xml", S_Security },
+  ["102"] = { "D_DoorLock1.xml",   S_DoorLock },    -- "Barrier Operator"
+  ["113"] = { nil, S_Security },  -- Switch
   ["128"] = { nil, S_EnergyMetering },
   ["152"] = { "D_MotionSensor1.xml", S_Security },
   ["156"] = { nil, S_Security },    -- Tamper switch ?
@@ -546,7 +555,7 @@ local function vDev_meta (v)
   local json_file = z[3]
   
   local devtype = (json_file or upnp_file or ''): match "^D_(%u+%l*)"
-  if devtype then devtype = devtype: lower () end
+--  if devtype then devtype = devtype: lower () end
 
   return {
     upnp_file = upnp_file,
@@ -589,7 +598,7 @@ local function luupDevice (node, instances)
   ------------------------
   -- a controller has no devices and is just a collection of buttons and switches or other services 
   if Ndev == 0 then
-    upnp_file, altid, devtype = DEV.controller, var[1].meta.node, "controller"
+    upnp_file, altid, devtype = DEV.controller, var[1].meta.node, " Controller"
     local txt = [[Define scene triggers to watch sl_SceneActivated]] ..
                 [[ with Lua Expression: new == "button_number"]]
     parameters = table.concat { SID.controller, ',', "Scenes", '=', txt }
@@ -602,13 +611,13 @@ local function luupDevice (node, instances)
   ------------------------
   -- a combo device is a collection of more than one vDev device, and may have service variables
   else
-    upnp_file, altid, devtype = DEV.combo, dev[1].meta.node, " combo"  -- (the space is important)
+    upnp_file, altid, devtype = DEV.combo, dev[1].meta.node, " Combo"  -- (the space is important)
     
     -- HOWEVER... if there are lots of dimmers, assume it's an RGB(W) combo
  
-    local dimmers = children.dimmable
+    local dimmers = children.Dimmable
     if dimmers and dimmers > 3 then     -- ... we'll asume that it's an RGB(W) switch
-      devtype = " RGB controller" 
+      devtype = " RGB Controller" 
       upnp_file = DEV.rgb
       
     else                                -- just a vanilla combination device
