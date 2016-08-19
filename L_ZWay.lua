@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 local ABOUT = {
   NAME          = "L_ZWay",
-  VERSION       = "2016.08.19b",
+  VERSION       = "2016.08.19c",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2016 AKBooer",
@@ -332,17 +332,14 @@ local command_class = {
       setVar ("Status",open_or_close (inst.metrics.level), SID[S_DoorLock], d)
   end,
  
-  -- alarm
-  ["113"] = function (d, inst)
-    command_class ["48"] (d, inst)
-  end,
- 
   -- battery
   ["128"] = function (d, inst)
     setVar ("BatteryLevel", inst.metrics.level, SID[S_HaDevice], d)
   end,
 
 }
+ 
+  command_class ["113"] = command_class ["48"]      -- alarm
 
     
 function command_class.new (dino, meta) 
