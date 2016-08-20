@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 local ABOUT = {
   NAME          = "L_ZWay",
-  VERSION       = "2016.08.19c",
+  VERSION       = "2016.08.20",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2016 AKBooer",
@@ -147,12 +147,29 @@ local S_HaDevice = {
 
 
 local S_Temperature = {
+  
+    GetApplication        = {returns = {CurrentApplication = "Application"}},  -- return value handled by action request mechanism
+    GetCurrentTemperature = {returns = {CurrentTemp = "CurrentTemperature"}},
+    GetName               = {returns = {CurrentName = "Name"}},
     
-  GetCurrentTemperature = function () end,  -- return value handled by action request mechanism
+    SetApplication = function (d, args)
+      local allowedValue = {"Room", "Outdoor", "Pipe", "AirDuct"}
+      for _, value in ipairs(allowedValue) do allowedValue[value] = true end
+      if allowedValue [args.NewApplication] then
+        luup.variable_set (args.serviceId, "Application", args.NewApplication, d)
+      end
+    end,
+    
+    SetName = function (d, args)
+      if args.NewName then
+        luup.variable_set (args.serviceId, "Name", args.NewName, d)
+      end
+    end,
+      
    }
 
 
-  -- urn:micasaverde-com:serviceId:SecuritySensor1
+  -- 
 local S_Security = {
     
     SetArmed = function (d, args)
@@ -210,6 +227,98 @@ local S_SceneController = { }
 local S_Unknown         = { }   -- "catch-all" service
 
 
+------------
+--
+-- Thermostat info
+--
+
+--[[
+
+D_HVAC_ZoneThermostat1.xml uses these default serviceIds and variables...
+
+["68"]
+SID[S_FanMode] = 
+urn:upnp-org:serviceId:HVAC_FanOperatingMode1,Mode=Auto
+urn:upnp-org:serviceId:HVAC_FanOperatingMode1,FanStatus=On
+   
+   <name>SetMode</name>
+         <name>NewMode</name>
+         <relatedStateVariable>Mode</relatedStateVariable>
+   <name>GetMode</name>
+         <name>CurrentMode</name>
+         <relatedStateVariable>Mode</relatedStateVariable>
+   <name>GetFanStatus</name>
+         <name>CurrentStatus</name>
+         <relatedStateVariable>FanStatus</relatedStateVariable>
+   <name>GetName</name>
+         <name>CurrentName</name>
+         <relatedStateVariable>Name</relatedStateVariable>
+   <name>SetName</name>
+         <name>NewName</name>
+         <relatedStateVariable>Name</relatedStateVariable>
+
+urn:micasaverde-com:serviceId:HVAC_OperatingState1,ModeState=Off
+
+  <allowedValue>Idle</allowedValue>
+  <allowedValue>Heating</allowedValue>
+  <allowedValue>Cooling</allowedValue>
+  <allowedValue>FanOnly</allowedValue>
+  <allowedValue>PendingHeat</allowedValue>
+  <allowedValue>PendingCool</allowedValue>
+  <allowedValue>Vent</allowedValue>
+
+
+SID[S_UserMode] = 
+urn:upnp-org:serviceId:HVAC_UserOperatingMode1,ModeTarget=Off
+urn:upnp-org:serviceId:HVAC_UserOperatingMode1,ModeStatus=Off
+urn:upnp-org:serviceId:HVAC_UserOperatingMode1,EnergyModeTarget=Normal
+urn:upnp-org:serviceId:HVAC_UserOperatingMode1,EnergyModeStatus=Normal
+
+   <name>SetModeTarget</name>
+         <name>NewModeTarget</name>
+         <relatedStateVariable>ModeTarget</relatedStateVariable>
+   <name>SetEnergyModeTarget</name>
+         <name>NewModeTarget</name>
+         <relatedStateVariable>EnergyModeTarget</relatedStateVariable>
+   <name>GetModeTarget</name>
+         <name>CurrentModeTarget</name>
+         <relatedStateVariable>ModeTarget</relatedStateVariable>
+   <name>GetModeStatus</name>
+         <name>CurrentModeStatus</name>
+         <relatedStateVariable>ModeStatus</relatedStateVariable>
+   <name>GetName</name>
+         <name>CurrentName</name>
+   <name>SetName</name>
+         <name>NewName</name>
+         <relatedStateVariable>Name</relatedStateVariable>
+
+SID[S_FanSpeed] = 
+urn:upnp-org:serviceId:FanSpeed1,FanSpeedTarget=0
+urn:upnp-org:serviceId:FanSpeed1,FanSpeedStatus=0
+urn:upnp-org:serviceId:FanSpeed1,DirectionTarget=0
+urn:upnp-org:serviceId:FanSpeed1,DirectionStatus=0
+   <name>SetFanSpeed</name>
+         <name>NewFanSpeedTarget</name>
+         <relatedStateVariable>FanSpeedTarget</relatedStateVariable>
+   <name>GetFanSpeed</name>
+         <name>CurrentFanSpeedStatus</name>
+         <relatedStateVariable>FanSpeedStatus</relatedStateVariable>
+   <name>GetFanSpeedTarget</name>
+         <name>CurrentFanSpeedTarget</name>
+         <relatedStateVariable>FanSpeedTarget</relatedStateVariable>
+   <name>SetFanDirection</name>
+         <name>NewDirectionTarget</name>
+         <relatedStateVariable>DirectionTarget</relatedStateVariable>
+   <name>GetFanDirection</name>
+         <name>CurrentDirectionStatus</name>
+         <relatedStateVariable>DirectionStatus</relatedStateVariable>
+    <name>GetFanDirectionTarget</name>
+         <name>CurrentDirectionTarget</name>
+         <relatedStateVariable>DirectionTarget</relatedStateVariable>
+
+
+--]]
+
 SID [S_Camera]          = "urn:micasaverde-com:serviceId:Camera1"
 SID [S_Color]           = "urn:micasaverde-com:serviceId:Color1"
 SID [S_Dimming]         = "urn:upnp-org:serviceId:Dimming1"
@@ -225,7 +334,7 @@ SID [S_Temperature]     = "urn:upnp-org:serviceId:TemperatureSensor1"
 SID [S_Unknown]         = "urn:upnp-org:serviceId:TemperatureSetpoint1"
 
 
-for schema, sid in pairs (SID) do -- reverse looup-up  sid ==> schema
+for schema, sid in pairs (SID) do -- reverse look-up  sid ==> schema
   if type(schema) == "table" then service_schema[sid] = schema end
 end
 
@@ -237,7 +346,11 @@ local function generic_action (serviceId, action)
     return false
   end 
   local service = service_schema[serviceId] or {}
-  return { run = service [action] or noop }
+  local act = service [action] or noop 
+  if type(act) == "function" then act = {run = act} end
+  act.serviceId = serviceId
+  act.action = action
+  return act
 end
 
 
@@ -339,7 +452,7 @@ local command_class = {
 
 }
  
-  command_class ["113"] = command_class ["48"]      -- alarm
+command_class ["113"] = command_class ["48"]      -- alarm
 
     
 function command_class.new (dino, meta) 
@@ -698,7 +811,7 @@ local function parameter_list (upnp_file)
   return parameters
 end
 
-local function appendZwayDevice (lul_device, handle, name, altid, upnp_file, json_file, extra)
+local function appendZwayDevice (lul_device, handle, name, altid, upnp_file, extra)
   local parameters = parameter_list (upnp_file)
   parameters = table.concat ({parameters, extra}, '\n')
   luup.chdev.append (
@@ -707,13 +820,12 @@ local function appendZwayDevice (lul_device, handle, name, altid, upnp_file, jso
     nil,                  -- device type
     upnp_file, nil,       -- device filename and implementation filename
     parameters  				   -- parameters: "service,variable=value\nservice..."
-    -- TODO: json_file ??
   )
 end
 
 
 -- create correct parent/child relationship between instances
-local function syncChildren(devNo, devices)
+local function createChildren(devNo, devices)
 
   local no_reload = true
 	local updater = {}
@@ -725,7 +837,7 @@ local function syncChildren(devNo, devices)
     
   local handle = luup.chdev.start(devNo);
 	for _, ldv in ipairs(luupDevs) do
-    appendZwayDevice (devNo, handle, ldv.name, ldv.altid, ldv.upnp_file, ldv.json_file, ldv.parameters)
+    appendZwayDevice (devNo, handle, ldv.name, ldv.altid, ldv.upnp_file, ldv.parameters)
 	end
 	local reload = luup.chdev.sync(devNo, handle, no_reload)   -- sync all the top-level devices
 
@@ -756,7 +868,7 @@ local function syncChildren(devNo, devices)
             local suffix = m.instance ~= '0' and m.instance or ''
             local name = title: format (node, metrics.title: match "%w+",  m.devtype or '?', suffix)
             updater[m.altid] = m
-            appendZwayDevice (dino, handle, name, m.altid, m.upnp_file, m.json_file)
+            appendZwayDevice (dino, handle, name, m.altid, m.upnp_file)
           end
         end
       end
@@ -777,6 +889,7 @@ local function syncChildren(devNo, devices)
     if top_level[dev.device_num_parent] then
       local altid = dev.id
       updater[altid] = command_class.new (dino, updater[altid])    -- create specific updaters for each device service
+      -- TODO: json_file 
     end
   end
   
@@ -891,7 +1004,7 @@ function init(devNo)
     luup.register_handler (handler, 'z' .. devNo)
     
     local vDevs = Z.devices ()
-    cclass_update = syncChildren (devNo, vDevs)
+    cclass_update = createChildren (devNo, vDevs)
     _G.updateChildren (vDevs)
   
   else
