@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 local ABOUT = {
   NAME          = "L_ZWay",
-  VERSION       = "2016.08.20",
+  VERSION       = "2016.08.23",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2016 AKBooer",
@@ -447,12 +447,16 @@ local command_class = {
  
   -- battery
   ["128"] = function (d, inst)
-    setVar ("BatteryLevel", inst.metrics.level, SID[S_HaDevice], d)
+    local level = tonumber (inst.metrics.level)
+    local warning = (level < 10) and "1" or "0"
+    setVar ("BatteryLevel", level, SID[S_HaDevice], d)
+    setVar ("sl_BatteryAlarm", warning, SID[S_HaDevice], d)
   end,
 
 }
  
 command_class ["113"] = command_class ["48"]      -- alarm
+command_class ["156"] = command_class ["48"]      -- tamper switch
 
     
 function command_class.new (dino, meta) 
@@ -600,7 +604,7 @@ SensorMultilevel
   ["113"] = { nil, S_Security },  -- Switch
   ["128"] = { nil, S_EnergyMetering },
   ["152"] = { "D_MotionSensor1.xml", S_Security },
-  ["156"] = { nil, S_Security },    -- Tamper switch ?
+  ["156"] = { "D_MotionSensor1.xml", S_Security },    -- Tamper switch?
 
 
 -- D_Siren1.xml
@@ -660,7 +664,8 @@ local function vDev_meta (v)
   local y = (x.scale or {})[scale] or {}
   local z = setmetatable (y, {__index = x})
   
-  local upnp_file = (0 < N and N < 128) and z[1] 
+--  local upnp_file = (0 < N and N < 128) and z[1] 
+  local upnp_file = z[1] 
   local service   = SID[z[2]]
   local json_file = z[3]
   
