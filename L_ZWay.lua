@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 local ABOUT = {
   NAME          = "L_ZWay",
-  VERSION       = "2016.08.25b",
+  VERSION       = "2016.08.25c",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2016 AKBooer",
@@ -632,7 +632,7 @@ SensorMultilevel
     3	"Water"	 - scale: {"Cubic meter","Cubic feet","US Gallon","Pulse Count"}
   --]]
   
-  ["64"] = { nil, S_HVAC_UserMode},    -- Thermostat_mode  
+  ["64"] = { "D_HVAC_ZoneThermostat1.xml", S_HVAC_UserMode},    -- Thermostat_mode  
         --	Off,Heat,Cool,Auto,Auxiliary,Resume,Fan Only,Furnace,Dry Air,Moist Air,Auto Change Over,
         --  Energy Save Heat,Energy Save Cool,Away Heat,Away Cool,Full Power,Manufacturer Specific
 
@@ -773,21 +773,20 @@ local function luupDevice (node, instances)
   else
     upnp_file, altid, devtype = DEV.combo, dev[1].meta.node, " Combo"  -- (the space is important)
     local dimmers = children.Dimmable
-    local thermos = children.HVAC
     
     -- HOWEVER... 
     
     -- if there are lots of dimmers, ...
-    if dimmers and dimmers > 3 then     -- ... we'll asume that it's an RGB(W) switch
+    if dimmers and dimmers > 3 then           -- ... we'll asume that it's an RGB(W) switch
       devtype = " RGB Controller" 
       upnp_file = DEV.rgb
       
     -- if there are any HVAC services, ...
-    elseif thermos > 0 then             -- ... it's a thermostat
-      devtype = " Thermostat" 
-      upnp_file = "D_HVAC_ZoneThermostat1.xml"
+--    elseif thermos and thermos > 0 then       -- ... it's a thermostat
+--      devtype = " Thermostat" 
+--      upnp_file = "D_HVAC_ZoneThermostat1.xml"
       
-    else                                -- just a vanilla combination device
+    else                                      -- just a vanilla combination device
       local label = {}
       for a,b in pairs(children) do
         label[#label+1] = table.concat {a,':', b}
