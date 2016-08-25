@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 local ABOUT = {
   NAME          = "L_ZWay",
-  VERSION       = "2016.08.23",
+  VERSION       = "2016.08.25",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2016 AKBooer",
@@ -231,13 +231,16 @@ local S_Unknown         = { }   -- "catch-all" service
 --
 -- Thermostat info
 --
+ 
 
+--D_HVAC_ZoneThermostat1.xml uses these default serviceIds and variables...
+
+local S_HVAC_FanMode = { }
 --[[
+-- command_class ["68"] Fan_mode
+        --ThermostatFanMode
+        --	Auto Low,On Low,Auto High,On High,Auto Medium,On Medium,Circulation,Humidity and circulation,Left and right,Up and down,Quite
 
-D_HVAC_ZoneThermostat1.xml uses these default serviceIds and variables...
-
-["68"]
-SID[S_FanMode] = 
 urn:upnp-org:serviceId:HVAC_FanOperatingMode1,Mode=Auto
 urn:upnp-org:serviceId:HVAC_FanOperatingMode1,FanStatus=On
    
@@ -256,7 +259,14 @@ urn:upnp-org:serviceId:HVAC_FanOperatingMode1,FanStatus=On
    <name>SetName</name>
          <name>NewName</name>
          <relatedStateVariable>Name</relatedStateVariable>
+--]]
 
+local S_HVAC_State = { }
+--[[
+--["66"] Operating_state
+--  ["67"]  -- Setpoint
+        --Setpoint
+        --	Heating,Cooling,Furnace,Dry Air,Moist Air,Auto Change Over,Energy Save Heating,Energy Save Cooling,Away Heating,Away Cooling,Full Power
 urn:micasaverde-com:serviceId:HVAC_OperatingState1,ModeState=Off
 
   <allowedValue>Idle</allowedValue>
@@ -266,9 +276,14 @@ urn:micasaverde-com:serviceId:HVAC_OperatingState1,ModeState=Off
   <allowedValue>PendingHeat</allowedValue>
   <allowedValue>PendingCool</allowedValue>
   <allowedValue>Vent</allowedValue>
+--]]
 
+local S_HVAC_UserMode = { }
 
-SID[S_UserMode] = 
+--  ["64"]      --ThermostatMode
+        --	Off,Heat,Cool,Auto,Auxiliary,Resume,Fan Only,Furnace,Dry Air,Moist Air,Auto Change Over,
+        --  Energy Save Heat,Energy Save Cool,Away Heat,Away Cool,Full Power,Manufacturer Specific
+--[[
 urn:upnp-org:serviceId:HVAC_UserOperatingMode1,ModeTarget=Off
 urn:upnp-org:serviceId:HVAC_UserOperatingMode1,ModeStatus=Off
 urn:upnp-org:serviceId:HVAC_UserOperatingMode1,EnergyModeTarget=Normal
@@ -291,8 +306,10 @@ urn:upnp-org:serviceId:HVAC_UserOperatingMode1,EnergyModeStatus=Normal
    <name>SetName</name>
          <name>NewName</name>
          <relatedStateVariable>Name</relatedStateVariable>
+--]]
 
-SID[S_FanSpeed] = 
+local S_HVAC_FanSpeed = { }
+--[[
 urn:upnp-org:serviceId:FanSpeed1,FanSpeedTarget=0
 urn:upnp-org:serviceId:FanSpeed1,FanSpeedStatus=0
 urn:upnp-org:serviceId:FanSpeed1,DirectionTarget=0
@@ -315,8 +332,6 @@ urn:upnp-org:serviceId:FanSpeed1,DirectionStatus=0
     <name>GetFanDirectionTarget</name>
          <name>CurrentDirectionTarget</name>
          <relatedStateVariable>DirectionTarget</relatedStateVariable>
-
-
 --]]
 
 SID [S_Camera]          = "urn:micasaverde-com:serviceId:Camera1"
@@ -438,6 +453,20 @@ local command_class = {
   ["98"] = function (d, inst)
       setVar ("Status",open_or_close (inst.metrics.level), SID[S_DoorLock], d)
   end,
+
+  -- thermostat
+  
+--   ["64"]       --ThermostatMode
+        --	Off,Heat,Cool,Auto,Auxiliary,Resume,Fan Only,Furnace,Dry Air,Moist Air,Auto Change Over,
+        --  Energy Save Heat,Energy Save Cool,Away Heat,Away Cool,Full Power,Manufacturer Specific
+ 
+--["66"] Operating_state
+--  ["67"] - { } -- Setpoint
+        --Setpoint
+        --	Heating,Cooling,Furnace,Dry Air,Moist Air,Auto Change Over,Energy Save Heating,Energy Save Cooling,Away Heating,Away Cooling,Full Power
+--["68"] Fan_mode
+        --ThermostatFanMode
+        --	Auto Low,On Low,Auto High,On High,Auto Medium,On Medium,Circulation,Humidity and circulation,Left and right,Up and down,Quite
 
   
   -- barrier operator (eg. garage door)
@@ -597,14 +626,25 @@ SensorMultilevel
     2	"Gas"	 - scale: {"Cubic meter","Cubic feet","reserved","Pulse Count"}
     3	"Water"	 - scale: {"Cubic meter","Cubic feet","US Gallon","Pulse Count"}
   --]]
-  ["56"] = { "D_HVAC_ZoneThermostat1.xml" },
+  
+  ["64"] = { "D_HVAC_ZoneThermostat1.xml", S_HVAC_UserMode},    -- Thermostat_mode  
+        --	Off,Heat,Cool,Auto,Auxiliary,Resume,Fan Only,Furnace,Dry Air,Moist Air,Auto Change Over,
+        --  Energy Save Heat,Energy Save Cool,Away Heat,Away Cool,Full Power,Manufacturer Specific
+
+  ["66"] = { nil, S_HVAC_State }, -- Operating_state
+  ["67"] = { nil, S_HVAC_State }, -- Setpoint
+        --	Heating,Cooling,Furnace,Dry Air,Moist Air,Auto Change Over,Energy Save Heating,Energy Save Cooling,Away Heating,Away Cooling,Full Power
+  
+  ["68"] = {nil, S_HVAC_FanMode}, -- ThermostatFanMode
+        --	Auto Low,On Low,Auto High,On High,Auto Medium,On Medium,Circulation,Humidity and circulation,Left and right,Up and down,Quite
+  
   ["98"] = { "D_DoorLock1.xml",   S_DoorLock },
   
   ["102"] = { "D_DoorLock1.xml",   S_DoorLock },    -- "Barrier Operator"
   ["113"] = { nil, S_Security },  -- Switch
   ["128"] = { nil, S_EnergyMetering },
   ["152"] = { "D_MotionSensor1.xml", S_Security },
-  ["156"] = { "D_MotionSensor1.xml", S_Security },    -- Tamper switch?
+  ["156"] = { nil, S_Security },    -- Tamper switch?
 
 
 -- D_Siren1.xml
@@ -727,13 +767,20 @@ local function luupDevice (node, instances)
   -- a combo device is a collection of more than one vDev device, and may have service variables
   else
     upnp_file, altid, devtype = DEV.combo, dev[1].meta.node, " Combo"  -- (the space is important)
-    
-    -- HOWEVER... if there are lots of dimmers, assume it's an RGB(W) combo
- 
     local dimmers = children.Dimmable
+    local thermos = children.HVAC
+    
+    -- HOWEVER... 
+    
+    -- if there are lots of dimmers, ...
     if dimmers and dimmers > 3 then     -- ... we'll asume that it's an RGB(W) switch
       devtype = " RGB Controller" 
       upnp_file = DEV.rgb
+      
+    -- if there are any HVAC services, ...
+    elseif thermos > 0 then             -- ... it's a thermostat
+      devtype = " Thermostat" 
+      upnp_file = "D_HVAC_ZoneThermostat1.xml"
       
     else                                -- just a vanilla combination device
       local label = {}
