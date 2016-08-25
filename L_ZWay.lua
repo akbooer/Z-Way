@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 local ABOUT = {
   NAME          = "L_ZWay",
-  VERSION       = "2016.08.25",
+  VERSION       = "2016.08.25b",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2016 AKBooer",
@@ -15,6 +15,11 @@ local json    = require "openLuup.json"
 local http    = require "socket.http"
 local ltn12   = require "ltn12"
 
+--[[
+local u = require "userdata"
+local i = luup.attr_get "InstalledPlugins2"
+i[#i+1] = u.preinstalled.ZWay
+--]]
 
 local Z         -- the Zway API object
 
@@ -627,7 +632,7 @@ SensorMultilevel
     3	"Water"	 - scale: {"Cubic meter","Cubic feet","US Gallon","Pulse Count"}
   --]]
   
-  ["64"] = { "D_HVAC_ZoneThermostat1.xml", S_HVAC_UserMode},    -- Thermostat_mode  
+  ["64"] = { nil, S_HVAC_UserMode},    -- Thermostat_mode  
         --	Off,Heat,Cool,Auto,Auxiliary,Resume,Fan Only,Furnace,Dry Air,Moist Air,Auto Change Over,
         --  Energy Save Heat,Energy Save Cool,Away Heat,Away Cool,Full Power,Manufacturer Specific
 
