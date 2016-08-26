@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 local ABOUT = {
   NAME          = "L_ZWay",
-  VERSION       = "2016.08.25c",
+  VERSION       = "2016.08.26",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2016 AKBooer",
@@ -32,7 +32,7 @@ local devNo
 local service_schema = {}    -- serviceId ==> schema implementation
 
 local DEV = {
-    controller  = "D_SceneController1.xml", -- these preset devices don't correspond to and ZWay vDev
+    controller  = "D_SceneController1.xml", -- these preset devices don't correspond to any ZWay vDev
     combo       = "D_ComboDevice1.xml",
     rgb         = "D_DimmableRGBLight1.xml",
 
@@ -238,9 +238,10 @@ local S_Unknown         = { }   -- "catch-all" service
 --
  
 
---D_HVAC_ZoneThermostat1.xml uses these default serviceIds and variables...
+-- D_HVAC_ZoneThermostat1.xml uses these default serviceIds and variables...
 
 local S_HVAC_FanMode = { }
+SID[S_HVAC_FanMode] = "urn:upnp-org:serviceId:HVAC_FanOperatingMode1"
 --[[
 -- command_class ["68"] Fan_mode
         --ThermostatFanMode
@@ -267,6 +268,7 @@ urn:upnp-org:serviceId:HVAC_FanOperatingMode1,FanStatus=On
 --]]
 
 local S_HVAC_State = { }
+SID[S_HVAC_State] = "urn:micasaverde-com:serviceId:HVAC_OperatingState1"
 --[[
 --["66"] Operating_state
 --  ["67"]  -- Setpoint
@@ -284,7 +286,7 @@ urn:micasaverde-com:serviceId:HVAC_OperatingState1,ModeState=Off
 --]]
 
 local S_HVAC_UserMode = { }
-
+SID[S_HVAC_UserMode] = "urn:upnp-org:serviceId:HVAC_UserOperatingMode1"
 --  ["64"]      --ThermostatMode
         --	Off,Heat,Cool,Auto,Auxiliary,Resume,Fan Only,Furnace,Dry Air,Moist Air,Auto Change Over,
         --  Energy Save Heat,Energy Save Cool,Away Heat,Away Cool,Full Power,Manufacturer Specific
@@ -314,6 +316,7 @@ urn:upnp-org:serviceId:HVAC_UserOperatingMode1,EnergyModeStatus=Normal
 --]]
 
 local S_HVAC_FanSpeed = { }
+SID[S_HVAC_FanSpeed] = "urn:upnp-org:serviceId:FanSpeed1"
 --[[
 urn:upnp-org:serviceId:FanSpeed1,FanSpeedTarget=0
 urn:upnp-org:serviceId:FanSpeed1,FanSpeedStatus=0
@@ -461,17 +464,21 @@ local command_class = {
 
   -- thermostat
   
---   ["64"]       --ThermostatMode
-        --	Off,Heat,Cool,Auto,Auxiliary,Resume,Fan Only,Furnace,Dry Air,Moist Air,Auto Change Over,
-        --  Energy Save Heat,Energy Save Cool,Away Heat,Away Cool,Full Power,Manufacturer Specific
- 
---["66"] Operating_state
---  ["67"] - { } -- Setpoint
-        --Setpoint
-        --	Heating,Cooling,Furnace,Dry Air,Moist Air,Auto Change Over,Energy Save Heating,Energy Save Cooling,Away Heating,Away Cooling,Full Power
---["68"] Fan_mode
-        --ThermostatFanMode
-        --	Auto Low,On Low,Auto High,On High,Auto Medium,On Medium,Circulation,Humidity and circulation,Left and right,Up and down,Quite
+  ["64"] = function (d, inst)       -- ThermostatMode
+    --	Off,Heat,Cool,Auto,Auxiliary,Resume,Fan Only,Furnace,Dry Air,Moist Air,Auto Change Over,
+    --  Energy Save Heat,Energy Save Cool,Away Heat,Away Cool,Full Power,Manufacturer Specific
+  end,
+
+  ["66"] = function (d, inst)       -- Operating_state
+  end,
+  
+  ["67"] = function (d, inst)       -- Setpoint
+    --	Heating,Cooling,Furnace,Dry Air,Moist Air,Auto Change Over,Energy Save Heating,Energy Save Cooling,Away Heating,Away Cooling,Full Power
+  end,
+  
+  ["68"] = function (d, inst)       -- ThermostatFanMode
+    --	Auto Low,On Low,Auto High,On High,Auto Medium,On Medium,Circulation,Humidity and circulation,Left and right,Up and down,Quite
+  end,
 
   
   -- barrier operator (eg. garage door)
@@ -633,15 +640,15 @@ SensorMultilevel
   --]]
   
   ["64"] = { "D_HVAC_ZoneThermostat1.xml", S_HVAC_UserMode},    -- Thermostat_mode  
-        --	Off,Heat,Cool,Auto,Auxiliary,Resume,Fan Only,Furnace,Dry Air,Moist Air,Auto Change Over,
-        --  Energy Save Heat,Energy Save Cool,Away Heat,Away Cool,Full Power,Manufacturer Specific
+    --	Off,Heat,Cool,Auto,Auxiliary,Resume,Fan Only,Furnace,Dry Air,Moist Air,Auto Change Over,
+    --  Energy Save Heat,Energy Save Cool,Away Heat,Away Cool,Full Power,Manufacturer Specific
 
   ["66"] = { nil, S_HVAC_State }, -- Operating_state
   ["67"] = { nil, S_HVAC_State }, -- Setpoint
-        --	Heating,Cooling,Furnace,Dry Air,Moist Air,Auto Change Over,Energy Save Heating,Energy Save Cooling,Away Heating,Away Cooling,Full Power
+    --	Heating,Cooling,Furnace,Dry Air,Moist Air,Auto Change Over,Energy Save Heating,Energy Save Cooling,Away Heating,Away Cooling,Full Power
   
   ["68"] = {nil, S_HVAC_FanMode}, -- ThermostatFanMode
-        --	Auto Low,On Low,Auto High,On High,Auto Medium,On Medium,Circulation,Humidity and circulation,Left and right,Up and down,Quite
+    --	Auto Low,On Low,Auto High,On High,Auto Medium,On Medium,Circulation,Humidity and circulation,Left and right,Up and down,Quite
   
   ["98"] = { "D_DoorLock1.xml",   S_DoorLock },
   
@@ -715,7 +722,6 @@ local function vDev_meta (v)
   local json_file = z[3]
   
   local devtype = (json_file or upnp_file or ''): match "^D_(%u+%l*)"
---  if devtype then devtype = devtype: lower () end
 
   return {
     upnp_file = upnp_file,
@@ -773,6 +779,7 @@ local function luupDevice (node, instances)
   else
     upnp_file, altid, devtype = DEV.combo, dev[1].meta.node, " Combo"  -- (the space is important)
     local dimmers = children.Dimmable
+    local thermos = children.HVAC
     
     -- HOWEVER... 
     
@@ -782,11 +789,18 @@ local function luupDevice (node, instances)
       upnp_file = DEV.rgb
       
     -- if there are any HVAC services, ...
---    elseif thermos and thermos > 0 then       -- ... it's a thermostat
---      devtype = " Thermostat" 
---      upnp_file = "D_HVAC_ZoneThermostat1.xml"
+    elseif thermos and thermos > 0 then       -- ... it's a thermostat
+      devtype = " Thermostat" 
+      upnp_file = "D_HVAC_ZoneThermostat1.xml"
+      for i, d in ipairs (dev) do             -- convert devices to embeded variables
+        var[#var+1] = d
+        dev[i] = nil
+        d.meta.upnp_file = nil
+        d.meta.devtype = nil
+      end
       
-    else                                      -- just a vanilla combination device
+    -- otherwise...
+    else                                      -- ... it's just a vanilla combination device
       local label = {}
       for a,b in pairs(children) do
         label[#label+1] = table.concat {a,':', b}
