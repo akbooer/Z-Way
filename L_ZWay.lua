@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 local ABOUT = {
   NAME          = "L_ZWay",
-  VERSION       = "2016.08.27c",
+  VERSION       = "2016.08.27d",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2016 AKBooer",
@@ -535,7 +535,7 @@ local command_class = {
     --  {Off = true, AutoChangeOver = true, CoolOn = true, HeatOn = true, }
       local ZtoV = {Off = "Off", Heat = "HeatOn", Cool = "CoolOn", Auto = "AutoChangeOver", ["Auto Change Over"] = "AutoChangeOver"}
       local level = inst.metrics.level
-      setVar ("ModeStatus", inst.meta.service, ZtoV[level] or level, d)
+      setVar ("ModeStatus", ZtoV[level] or level, inst.meta.service, d)
   end,
 
   ["66"] = function (d, inst)       -- Operating_state
@@ -552,7 +552,7 @@ local command_class = {
       sid = SID.cool
     end
     if sid then
-      setVar ("SetpointAchieved", sid, inst.metrics.level, d)
+      setVar ("SetpointAchieved", inst.metrics.level, sid, d)
     end
   end,
   
