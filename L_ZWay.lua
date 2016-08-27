@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 local ABOUT = {
   NAME          = "L_ZWay",
-  VERSION       = "2016.08.27g",
+  VERSION       = "2016.08.27h",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2016 AKBooer",
@@ -401,7 +401,13 @@ local S_TemperatureSetpoint = {
     end,
     
 }
+
+local S_TemperatureSetpointHeat = S_TemperatureSetpoint
+local S_TemperatureSetpointCool = S_TemperatureSetpoint
+
 SID [S_TemperatureSetpoint]         = "urn:upnp-org:serviceId:TemperatureSetpoint1"
+SID [S_TemperatureSetpointHeat]     = "urn:upnp-org:serviceId:TemperatureSetpoint1_Heat"
+SID [S_TemperatureSetpointCool]     = "urn:upnp-org:serviceId:TemperatureSetpoint1_Cool"
 
 --[[
 --]]
@@ -722,9 +728,14 @@ SensorMultilevel
     --	Off,Heat,Cool,Auto,Auxiliary,Resume,Fan Only,Furnace,Dry Air,Moist Air,Auto Change Over,
     --  Energy Save Heat,Energy Save Cool,Away Heat,Away Cool,Full Power,Manufacturer Specific
   ["66"] = { nil, S_HVAC_State }, -- Operating_state
-  ["67"] = { nil, S_TemperatureSetpoint }, -- Setpoint
+  ["67"] = { nil, S_TemperatureSetpoint, -- Setpoint
     --	Heating,Cooling,Furnace,Dry Air,Moist Air,Auto Change Over,Energy Save Heating,Energy Save Cooling,Away Heating,Away Cooling,Full Power
-  
+    scale = {
+      ["1"]  = { nil, S_TemperatureSetpointHeat },
+      ["2"]  = { nil, S_TemperatureSetpointCool },
+    },
+  },
+    
   ["68"] = {nil, S_HVAC_FanMode}, -- ThermostatFanMode
     --	Auto Low,On Low,Auto High,On High,Auto Medium,On Medium,Circulation,Humidity and circulation,Left and right,Up and down,Quite
   
