@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 local ABOUT = {
   NAME          = "L_ZWay",
-  VERSION       = "2016.08.27e",
+  VERSION       = "2016.08.27f",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2016 AKBooer",
@@ -527,7 +527,7 @@ local command_class = {
 
   -- thermostat
   
-  ["64"] = function (d, inst)       -- ThermostatMode
+  ["64"] = function (d, inst, meta)       -- ThermostatMode
     -- ZWay modes:
     --	Off,Heat,Cool,Auto,Auxiliary,Resume,Fan Only,Furnace,Dry Air,Moist Air,Auto Change Over,
     --  Energy Save Heat,Energy Save Cool,Away Heat,Away Cool,Full Power,Manufacturer Specific.
@@ -535,19 +535,15 @@ local command_class = {
     --  {Off = true, AutoChangeOver = true, CoolOn = true, HeatOn = true, }
       local ZtoV = {Off = "Off", Heat = "HeatOn", Cool = "CoolOn", Auto = "AutoChangeOver", ["Auto Change Over"] = "AutoChangeOver"}
       local level = inst.metrics.level
-      if inst.meta then
-        setVar ("ModeStatus", ZtoV[level] or level, inst.meta.service, d)
-      else
-        log ("NO META: " .. json.encode (inst))
-      end
+      setVar ("ModeStatus", ZtoV[level] or level, meta.service, d)
   end,
 
   ["66"] = function (d, inst)       -- Operating_state
   end,
   
-  ["67"] = function (d, inst)       -- Setpoint
+  ["67"] = function (d, inst, meta)       -- Setpoint
     --	Heating,Cooling,Furnace,Dry Air,Moist Air,Auto Change Over,Energy Save Heating,Energy Save Cooling,Away Heating,Away Cooling,Full Power
-    local scale = inst.meta.scale
+    local scale = meta.scale
     local sid
     if scale == "1" then  -- heat
       sid = SID.heat
