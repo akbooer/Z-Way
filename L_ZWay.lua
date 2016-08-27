@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 local ABOUT = {
   NAME          = "L_ZWay",
-  VERSION       = "2016.08.27",
+  VERSION       = "2016.08.27b",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2016 AKBooer",
@@ -45,6 +45,9 @@ local SID = {          -- schema implementation or shorthand name ==> serviceId
     controller  = "urn:micasaverde-com:serviceId:SceneController1",
     combo       = "urn:micasaverde-com:serviceId:ComboDevice1",
     rgb         = "urn:micasaverde-com:serviceId:Color1",
+    
+    heat = "urn:upnp-org:serviceId:TemperatureSetpoint1_Heat",    -- for thermostat setpoints
+    cool = "urn:upnp-org:serviceId:TemperatureSetpoint1_Cool",
   }
 
 -- LUUP utility functions 
@@ -376,32 +379,27 @@ urn:upnp-org:serviceId:FanSpeed1,DirectionStatus=0
 SID[S_HVAC_FanSpeed] = "urn:upnp-org:serviceId:FanSpeed1"
 
 local S_TemperatureSetpoint = {
+    
+    GetApplication = Application.get,
+    SetApplication = Application.set,
+    
+    GetCurrentSetpoint  = {returns = {CurrentSP  = "CurrentSetpoint"}},
+    GetSetpointAchieved = {returns = {CurrentSPA = "SetpointAchieved"}},
+    
+    GetName = Name.get,
+    SetName = Name.set,
   
-  --[[
-         
-         <name>GetApplication</name>
-               <name>CurrentApplication</name>
-               <relatedStateVariable>Application</relatedStateVariable>
-         <name>SetApplication</name>
-               <name>NewApplication</name>
-               <relatedStateVariable>Application</relatedStateVariable>
-         <name>SetCurrentSetpoint</name>
-               <name>NewCurrentSetpoint</name>
-               <relatedStateVariable>CurrentSetpoint</relatedStateVariable>
-         <name>GetCurrentSetpoint</name>
-               <name>CurrentSP</name>
-               <relatedStateVariable>CurrentSetpoint</relatedStateVariable>
-         <name>GetSetpointAchieved</name>
-               <name>CurrentSPA</name>
-               <relatedStateVariable>SetpointAchieved</relatedStateVariable>
-         <name>GetName</name>
-               <name>CurrentName</name>
-               <relatedStateVariable>Name</relatedStateVariable>
-         <name>SetName</name>
-               <name>NewName</name>
-               <relatedStateVariable>Name</relatedStateVariable>
-
-  --]]
+    SetCurrentSetpoint = function (d, args)
+      local level = args.NewCurrentSetpoint
+      if level then
+        setVar ("CurrentSetpoint", args.serviceId, level, d)
+        local value = "exact?level=" .. level
+        local altid = luup.devices[d].id
+        altid = altid: match "^%d+$" and altid.."-0-67" or altid
+        Z.command (altid, value)
+      end
+    end,
+    
 }
 SID [S_TemperatureSetpoint]         = "urn:upnp-org:serviceId:TemperatureSetpoint1"
 
@@ -530,8 +528,14 @@ local command_class = {
   -- thermostat
   
   ["64"] = function (d, inst)       -- ThermostatMode
+    -- ZWay modes:
     --	Off,Heat,Cool,Auto,Auxiliary,Resume,Fan Only,Furnace,Dry Air,Moist Air,Auto Change Over,
-    --  Energy Save Heat,Energy Save Cool,Away Heat,Away Cool,Full Power,Manufacturer Specific
+    --  Energy Save Heat,Energy Save Cool,Away Heat,Away Cool,Full Power,Manufacturer Specific.
+    -- Vera modes:
+    --  {Off = true, AutoChangeOver = true, CoolOn = true, HeatOn = true, }
+      local ZtoV = {Off = "Off", Heat = "HeatOn", Cool = "CoolOn", Auto = "AutoChangeOver", ["Auto Change Over"] = "AutoChangeOver"}
+      local level = inst.metrics.level
+      setVar ("ModeStatus", inst.meta.service, ZtoV[level] or level, d)
   end,
 
   ["66"] = function (d, inst)       -- Operating_state
@@ -539,6 +543,17 @@ local command_class = {
   
   ["67"] = function (d, inst)       -- Setpoint
     --	Heating,Cooling,Furnace,Dry Air,Moist Air,Auto Change Over,Energy Save Heating,Energy Save Cooling,Away Heating,Away Cooling,Full Power
+    local scale = inst.meta.scale
+    local value = inst.metrics.value
+    local sid
+    if scale == "1" then  -- heat
+      sid = SID.heat
+    elseif scale == "2" then  -- cool
+      sid = SID.cool
+    end
+    if sid then
+      setVar ("SetpointAchieved", sid, inst.metrics.level, d)
+    end
   end,
   
   ["68"] = function (d, inst)       -- ThermostatFanMode
@@ -707,9 +722,8 @@ SensorMultilevel
   ["64"] = { "D_HVAC_ZoneThermostat1.xml", S_HVAC_UserMode},    -- Thermostat_mode  
     --	Off,Heat,Cool,Auto,Auxiliary,Resume,Fan Only,Furnace,Dry Air,Moist Air,Auto Change Over,
     --  Energy Save Heat,Energy Save Cool,Away Heat,Away Cool,Full Power,Manufacturer Specific
-
   ["66"] = { nil, S_HVAC_State }, -- Operating_state
-  ["67"] = { nil, S_HVAC_State }, -- Setpoint
+  ["67"] = { nil, S_TemperatureSetpoint }, -- Setpoint
     --	Heating,Cooling,Furnace,Dry Air,Moist Air,Auto Change Over,Energy Save Heating,Energy Save Cooling,Away Heating,Away Cooling,Full Power
   
   ["68"] = {nil, S_HVAC_FanMode}, -- ThermostatFanMode
@@ -775,13 +789,11 @@ local NICS_pattern = "^(%d+)%-(%d+)%-(%d+)%-?(%d*)%-?(%d*)%-?(%d*)%-?(.-)$"
 local function vDev_meta (v)
   local altid = v.id: match "([%-%w]+)$"
   local node, instance, c_class, scale, sub_class, sub_scale, tail = altid: match (NICS_pattern)
-  local N = tonumber (c_class) or 0
     
   local x = vMap[c_class] or {}
   local y = (x.scale or {})[scale] or {}
   local z = setmetatable (y, {__index = x})
   
---  local upnp_file = (0 < N and N < 128) and z[1] 
   local upnp_file = z[1] 
   local service   = SID[z[2]]
   local json_file = z[3]
