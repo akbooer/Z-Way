@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 local ABOUT = {
   NAME          = "L_ZWay",
-  VERSION       = "2016.08.27f",
+  VERSION       = "2016.08.27g",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2016 AKBooer",
@@ -392,7 +392,7 @@ local S_TemperatureSetpoint = {
     SetCurrentSetpoint = function (d, args)
       local level = args.NewCurrentSetpoint
       if level then
-        luup.variable_set ("CurrentSetpoint", args.serviceId, level, d)
+        luup.variable_set (args.serviceId, "CurrentSetpoint", level, d)
         local value = "exact?level=" .. level
         local altid = luup.devices[d].id
         altid = altid: match "^%d+$" and altid.."-0-67" or altid
