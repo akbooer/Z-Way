@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 local ABOUT = {
   NAME          = "L_ZWay",
-  VERSION       = "2016.08.26",
+  VERSION       = "2016.08.27",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2016 AKBooer",
@@ -102,6 +102,38 @@ end
 
 ----------------------------------------------------
 --
+-- GENERIC GET/SET SERVICES - used by several actual services
+--                          - local effect only (no ZWay communication)
+--
+ 
+local Name = {
+  get = {returns = {CurrentName = "Name"}},
+  
+  set = function (d, args)
+    if args.NewName then
+      luup.variable_set (args.serviceId, "Name", args.NewName, d)
+    end
+  end,
+}
+  
+local Application  = {
+  get = {returns = {CurrentApplication = "Application"}},  -- return value handled by action request mechanism
+    
+  set = function (d, args, allowedValue)
+    local valid = true
+    if allowedValue then
+      for _, value in ipairs(allowedValue) do allowedValue[value] = true end
+      valid = allowedValue [args.NewApplication]
+    end
+    if valid then
+      luup.variable_set (args.serviceId, "Application", args.NewApplication, d)
+    end
+  end,
+}  
+
+
+----------------------------------------------------
+--
 -- SERVICE SCHEMAS - virtual services
 -- openLuup => Zway
 --
@@ -153,23 +185,13 @@ local S_HaDevice = {
 
 local S_Temperature = {
   
-    GetApplication        = {returns = {CurrentApplication = "Application"}},  -- return value handled by action request mechanism
+    GetApplication = Application.get,
+    SetApplication = function (d, args) return Application.set (d, args, {"Room", "Outdoor", "Pipe", "AirDuct"}) end,
+    
     GetCurrentTemperature = {returns = {CurrentTemp = "CurrentTemperature"}},
-    GetName               = {returns = {CurrentName = "Name"}},
     
-    SetApplication = function (d, args)
-      local allowedValue = {"Room", "Outdoor", "Pipe", "AirDuct"}
-      for _, value in ipairs(allowedValue) do allowedValue[value] = true end
-      if allowedValue [args.NewApplication] then
-        luup.variable_set (args.serviceId, "Application", args.NewApplication, d)
-      end
-    end,
-    
-    SetName = function (d, args)
-      if args.NewName then
-        luup.variable_set (args.serviceId, "Name", args.NewName, d)
-      end
-    end,
+    GetName = Name.get,
+    SetName = Name.set,
       
    }
 
@@ -240,36 +262,32 @@ local S_Unknown         = { }   -- "catch-all" service
 
 -- D_HVAC_ZoneThermostat1.xml uses these default serviceIds and variables...
 
-local S_HVAC_FanMode = { }
-SID[S_HVAC_FanMode] = "urn:upnp-org:serviceId:HVAC_FanOperatingMode1"
+local S_HVAC_FanMode = { 
+  
+  --   <name>SetMode</name>
+  --         <name>NewMode</name>
+  --         <relatedStateVariable>Mode</relatedStateVariable>
+  -- command_class ["68"] Fan_mode
+    --ThermostatFanMode
+    --	Auto Low,On Low,Auto High,On High,Auto Medium,On Medium,Circulation,Humidity and circulation,Left and right,Up and down,Quite
+  SetMode = function (d, args)
+    local valid = {Auto = true, ContinuousOn = true, PeriodicOn = true}
+  end,
 --[[
--- command_class ["68"] Fan_mode
-        --ThermostatFanMode
-        --	Auto Low,On Low,Auto High,On High,Auto Medium,On Medium,Circulation,Humidity and circulation,Left and right,Up and down,Quite
 
 urn:upnp-org:serviceId:HVAC_FanOperatingMode1,Mode=Auto
 urn:upnp-org:serviceId:HVAC_FanOperatingMode1,FanStatus=On
-   
-   <name>SetMode</name>
-         <name>NewMode</name>
-         <relatedStateVariable>Mode</relatedStateVariable>
-   <name>GetMode</name>
-         <name>CurrentMode</name>
-         <relatedStateVariable>Mode</relatedStateVariable>
-   <name>GetFanStatus</name>
-         <name>CurrentStatus</name>
-         <relatedStateVariable>FanStatus</relatedStateVariable>
-   <name>GetName</name>
-         <name>CurrentName</name>
-         <relatedStateVariable>Name</relatedStateVariable>
-   <name>SetName</name>
-         <name>NewName</name>
-         <relatedStateVariable>Name</relatedStateVariable>
---]]
+   --]]
+  GetMode      = { returns = {CurrentMode    = "Mode"      } },
+  GetFanStatus = { returns = {CurrentStatus  = "FanStatus" } },
+  
+  GetName = Name.get,
+  SetName = Name.set,
+  
+  }
+SID[S_HVAC_FanMode] = "urn:upnp-org:serviceId:HVAC_FanOperatingMode1"
 
-local S_HVAC_State = { }
-SID[S_HVAC_State] = "urn:micasaverde-com:serviceId:HVAC_OperatingState1"
---[[
+local S_HVAC_State = { --[[
 --["66"] Operating_state
 --  ["67"]  -- Setpoint
         --Setpoint
@@ -284,21 +302,33 @@ urn:micasaverde-com:serviceId:HVAC_OperatingState1,ModeState=Off
   <allowedValue>PendingCool</allowedValue>
   <allowedValue>Vent</allowedValue>
 --]]
+}
+SID[S_HVAC_State] = "urn:micasaverde-com:serviceId:HVAC_OperatingState1"
 
-local S_HVAC_UserMode = { }
-SID[S_HVAC_UserMode] = "urn:upnp-org:serviceId:HVAC_UserOperatingMode1"
+local S_HVAC_UserMode = { 
+  
+  --   <name>SetModeTarget</name>
+  --         <name>NewModeTarget</name>
+  --         <relatedStateVariable>ModeTarget</relatedStateVariable>
+  SetModeTarget = function (d, args)
+    local valid = {Off = true, AutoChangeOver = true, CoolOn = true, HeatOn = true, }
+
+    local value = args.NewModeTarget
+    if valid[value] then
+--      luup.variable_set (args.serviceId, "ModeTarget", value, d)
+    end
+  end, 
+ 
 --  ["64"]      --ThermostatMode
         --	Off,Heat,Cool,Auto,Auxiliary,Resume,Fan Only,Furnace,Dry Air,Moist Air,Auto Change Over,
         --  Energy Save Heat,Energy Save Cool,Away Heat,Away Cool,Full Power,Manufacturer Specific
---[[
-urn:upnp-org:serviceId:HVAC_UserOperatingMode1,ModeTarget=Off
-urn:upnp-org:serviceId:HVAC_UserOperatingMode1,ModeStatus=Off
-urn:upnp-org:serviceId:HVAC_UserOperatingMode1,EnergyModeTarget=Normal
-urn:upnp-org:serviceId:HVAC_UserOperatingMode1,EnergyModeStatus=Normal
 
-   <name>SetModeTarget</name>
-         <name>NewModeTarget</name>
-         <relatedStateVariable>ModeTarget</relatedStateVariable>
+--urn:upnp-org:serviceId:HVAC_UserOperatingMode1,ModeTarget=Off
+--urn:upnp-org:serviceId:HVAC_UserOperatingMode1,ModeStatus=Off
+--urn:upnp-org:serviceId:HVAC_UserOperatingMode1,EnergyModeTarget=Normal
+--urn:upnp-org:serviceId:HVAC_UserOperatingMode1,EnergyModeStatus=Normal
+
+   --[[
    <name>SetEnergyModeTarget</name>
          <name>NewModeTarget</name>
          <relatedStateVariable>EnergyModeTarget</relatedStateVariable>
@@ -314,10 +344,11 @@ urn:upnp-org:serviceId:HVAC_UserOperatingMode1,EnergyModeStatus=Normal
          <name>NewName</name>
          <relatedStateVariable>Name</relatedStateVariable>
 --]]
+ 
+  }
+SID[S_HVAC_UserMode] = "urn:upnp-org:serviceId:HVAC_UserOperatingMode1"
 
-local S_HVAC_FanSpeed = { }
-SID[S_HVAC_FanSpeed] = "urn:upnp-org:serviceId:FanSpeed1"
---[[
+local S_HVAC_FanSpeed = { --[[
 urn:upnp-org:serviceId:FanSpeed1,FanSpeedTarget=0
 urn:upnp-org:serviceId:FanSpeed1,FanSpeedStatus=0
 urn:upnp-org:serviceId:FanSpeed1,DirectionTarget=0
@@ -341,6 +372,41 @@ urn:upnp-org:serviceId:FanSpeed1,DirectionStatus=0
          <name>CurrentDirectionTarget</name>
          <relatedStateVariable>DirectionTarget</relatedStateVariable>
 --]]
+}
+SID[S_HVAC_FanSpeed] = "urn:upnp-org:serviceId:FanSpeed1"
+
+local S_TemperatureSetpoint = {
+  
+  --[[
+         
+         <name>GetApplication</name>
+               <name>CurrentApplication</name>
+               <relatedStateVariable>Application</relatedStateVariable>
+         <name>SetApplication</name>
+               <name>NewApplication</name>
+               <relatedStateVariable>Application</relatedStateVariable>
+         <name>SetCurrentSetpoint</name>
+               <name>NewCurrentSetpoint</name>
+               <relatedStateVariable>CurrentSetpoint</relatedStateVariable>
+         <name>GetCurrentSetpoint</name>
+               <name>CurrentSP</name>
+               <relatedStateVariable>CurrentSetpoint</relatedStateVariable>
+         <name>GetSetpointAchieved</name>
+               <name>CurrentSPA</name>
+               <relatedStateVariable>SetpointAchieved</relatedStateVariable>
+         <name>GetName</name>
+               <name>CurrentName</name>
+               <relatedStateVariable>Name</relatedStateVariable>
+         <name>SetName</name>
+               <name>NewName</name>
+               <relatedStateVariable>Name</relatedStateVariable>
+
+  --]]
+}
+SID [S_TemperatureSetpoint]         = "urn:upnp-org:serviceId:TemperatureSetpoint1"
+
+--[[
+--]]
 
 SID [S_Camera]          = "urn:micasaverde-com:serviceId:Camera1"
 SID [S_Color]           = "urn:micasaverde-com:serviceId:Color1"
@@ -354,7 +420,6 @@ SID [S_Light]           = "urn:micasaverde-com:serviceId:LightSensor1"
 SID [S_Security]        = "urn:micasaverde-com:serviceId:SecuritySensor1"
 SID [S_SwitchPower]     = "urn:upnp-org:serviceId:SwitchPower1"
 SID [S_Temperature]     = "urn:upnp-org:serviceId:TemperatureSensor1"
-SID [S_Unknown]         = "urn:upnp-org:serviceId:TemperatureSetpoint1"
 
 
 for schema, sid in pairs (SID) do -- reverse look-up  sid ==> schema
@@ -792,12 +857,17 @@ local function luupDevice (node, instances)
     elseif thermos and thermos > 0 then       -- ... it's a thermostat
       devtype = " Thermostat" 
       upnp_file = "D_HVAC_ZoneThermostat1.xml"
-      for i, d in ipairs (dev) do             -- convert devices to embeded variables
-        var[#var+1] = d
-        dev[i] = nil
-        d.meta.upnp_file = nil
-        d.meta.devtype = nil
+      local newdev = {}
+      for i, d in ipairs (dev) do             -- convert instance 0 devices to embeded variables
+        if d.meta.instance ~= "0" then 
+          newdev[#newdev+1] = d
+        else
+          var[#var+1] = d
+          d.meta.upnp_file = nil
+          d.meta.devtype = nil
+        end
       end
+      dev = newdev
       
     -- otherwise...
     else                                      -- ... it's just a vanilla combination device
