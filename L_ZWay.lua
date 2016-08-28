@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 local ABOUT = {
   NAME          = "L_ZWay",
-  VERSION       = "2016.08.27h",
+  VERSION       = "2016.08.28",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2016 AKBooer",
@@ -402,8 +402,15 @@ local S_TemperatureSetpoint = {
     
 }
 
-local S_TemperatureSetpointHeat = S_TemperatureSetpoint
-local S_TemperatureSetpointCool = S_TemperatureSetpoint
+local function shallow_copy (x)
+  local y = {}
+  for a,b in pairs (x) do y[a] = b end
+  return y
+end
+
+-- these copies MUST be separate tables, since they're used to index the SID table
+local S_TemperatureSetpointHeat = shallow_copy (S_TemperatureSetpoint)
+local S_TemperatureSetpointCool = shallow_copy (S_TemperatureSetpoint)
 
 SID [S_TemperatureSetpoint]         = "urn:upnp-org:serviceId:TemperatureSetpoint1"
 SID [S_TemperatureSetpointHeat]     = "urn:upnp-org:serviceId:TemperatureSetpoint1_Heat"
