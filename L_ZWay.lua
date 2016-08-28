@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 local ABOUT = {
   NAME          = "L_ZWay",
-  VERSION       = "2016.08.28",
+  VERSION       = "2016.08.28b",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2016 AKBooer",
@@ -46,9 +46,11 @@ local SID = {          -- schema implementation or shorthand name ==> serviceId
     combo       = "urn:micasaverde-com:serviceId:ComboDevice1",
     rgb         = "urn:micasaverde-com:serviceId:Color1",
     
-    heat = "urn:upnp-org:serviceId:TemperatureSetpoint1_Heat",    -- for thermostat setpoints
-    cool = "urn:upnp-org:serviceId:TemperatureSetpoint1_Cool",
-  }
+    setpoint      = "urn:upnp-org:serviceId:TemperatureSetpoint1",
+    setpointHeat  = "urn:upnp-org:serviceId:TemperatureSetpoint1_Heat",
+    setpointCool  = "urn:upnp-org:serviceId:TemperatureSetpoint1_Cool",
+ 
+ }
 
 -- LUUP utility functions 
 
@@ -378,6 +380,7 @@ urn:upnp-org:serviceId:FanSpeed1,DirectionStatus=0
 }
 SID[S_HVAC_FanSpeed] = "urn:upnp-org:serviceId:FanSpeed1"
 
+
 local S_TemperatureSetpoint = {
     
     GetApplication = Application.get,
@@ -392,10 +395,18 @@ local S_TemperatureSetpoint = {
     SetCurrentSetpoint = function (d, args)
       local level = args.NewCurrentSetpoint
       if level then
-        luup.variable_set (args.serviceId, "CurrentSetpoint", level, d)
+        local sid = args.serviceId
+        luup.variable_set (sid, "CurrentSetpoint", level, d)
         local value = "exact?level=" .. level
         local altid = luup.devices[d].id
-        altid = altid: match "^%d+$" and altid.."-0-67" or altid
+        if altid: match "^%d+$" then
+          local suffix = {
+            [SID.setpoint]      = "-0-67",
+            [SID.setpointHeat]  = "-0-67-1",
+            [SID.setpointCool]  = "-0-67-2",
+          }
+          altid = altid .. (suffix[args.serviceId] or '')
+        end
         Z.command (altid, value)
       end
     end,
@@ -412,9 +423,9 @@ end
 local S_TemperatureSetpointHeat = shallow_copy (S_TemperatureSetpoint)
 local S_TemperatureSetpointCool = shallow_copy (S_TemperatureSetpoint)
 
-SID [S_TemperatureSetpoint]         = "urn:upnp-org:serviceId:TemperatureSetpoint1"
-SID [S_TemperatureSetpointHeat]     = "urn:upnp-org:serviceId:TemperatureSetpoint1_Heat"
-SID [S_TemperatureSetpointCool]     = "urn:upnp-org:serviceId:TemperatureSetpoint1_Cool"
+SID [S_TemperatureSetpoint]         = SID.setpoint
+SID [S_TemperatureSetpointHeat]     = SID.setpointHeat
+SID [S_TemperatureSetpointCool]     = SID.setpointCool
 
 --[[
 --]]
@@ -559,9 +570,9 @@ local command_class = {
     local scale = meta.scale
     local sid
     if scale == "1" then  -- heat
-      sid = SID.heat
+      sid = SID.setpointHeat
     elseif scale == "2" then  -- cool
-      sid = SID.cool
+      sid = SID.setpointCool
     end
     if sid then
       setVar ("SetpointAchieved", inst.metrics.level, sid, d)
