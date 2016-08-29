@@ -1,8 +1,8 @@
 module (..., package.seeall)
 
-local ABOUT = {
+ABOUT = {
   NAME          = "L_ZWay",
-  VERSION       = "2016.08.28b",
+  VERSION       = "2016.08.29",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2016 AKBooer",
