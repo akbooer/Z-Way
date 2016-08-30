@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 ABOUT = {
   NAME          = "L_ZWay",
-  VERSION       = "2016.08.29",
+  VERSION       = "2016.08.30",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2016 AKBooer",
@@ -600,7 +600,7 @@ local command_class = {
 }
  
 command_class ["113"] = command_class ["48"]      -- alarm
-command_class ["156"] = command_class ["48"]      -- tamper switch
+--command_class ["156"] = command_class ["48"]      -- tamper switch
 
     
 function command_class.new (dino, meta) 
