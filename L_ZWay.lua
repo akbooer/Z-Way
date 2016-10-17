@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 ABOUT = {
   NAME          = "L_ZWay",
-  VERSION       = "2016.08.30",
+  VERSION       = "2016.10.17",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2016 AKBooer",
@@ -14,12 +14,6 @@ local loader  = require "openLuup.loader"
 local json    = require "openLuup.json"
 local http    = require "socket.http"
 local ltn12   = require "ltn12"
-
---[[
-local u = require "userdata"
-local i = luup.attr_get "InstalledPlugins2"
-i[#i+1] = u.preinstalled.ZWay
---]]
 
 local Z         -- the Zway API object
 
@@ -1107,13 +1101,18 @@ local function ZWayVDev_API (ip, user, password)
       log (url)
       log (json_response)
     end
+    return status, json_response
+  end
+  
+  local function HTTP_request_json (url, body)
+    local  status, json_response = HTTP_request (url, body)
     return status, json.decode (json_response)
   end
 
   local function authenticate ()
     local url = "http://%s:8083/ZAutomation/api/v1/login"
     local data = json.encode {login=user, password = password}
-    local _, j = HTTP_request (url: format (ip), data)
+    local _, j = HTTP_request_json (url: format (ip), data)
     
     if j then
       local sid = j and j.data and j.data.sid
@@ -1124,7 +1123,7 @@ local function ZWayVDev_API (ip, user, password)
 
   local function devices ()
     local url = "http://%s:8083/ZAutomation/api/v1/devices"
-    local _, d = HTTP_request (url: format (ip))    
+    local _, d = HTTP_request_json (url: format (ip))    
     return d and d.data and d.data.devices
   end
   
@@ -1132,12 +1131,20 @@ local function ZWayVDev_API (ip, user, password)
   local function command (id, cmd)
     local url = "http://%s:8083/ZAutomation/api/v1/devices/ZWayVDev_zway_%s/command/%s"
     local request = url: format (ip, id, cmd)
+    return HTTP_request_json (request)
+  end
+  
+  -- send a generic request
+  local function request (req)
+    local url = "http://%s:8083%s"
+    local request = url: format (ip, req)
     return HTTP_request (request)
   end
   
   -- ZWayVDev()
   if authenticate () then
     return {
+      request = request,    -- for low-level access
       command = command,
       devices = devices,
     }
@@ -1178,6 +1185,8 @@ function init(devNo)
     luup.set_failure (0, devNo)	        -- openLuup is UI7 compatible
     status, comment = true, "OK"
   
+    HTTP_request = function (url) return Z.request (url) end        -- global low-level access
+    
     -- device-specific ID for HTTP handler allows multiple plugin instances
     local handler = "HTTP_Z-Way_" .. devNo
     _G[handler] = function () return json.encode (D), "application/json" end
