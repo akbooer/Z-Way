@@ -2,13 +2,32 @@ module (..., package.seeall)
 
 ABOUT = {
   NAME          = "L_ZWay",
-  VERSION       = "2016.10.17",
+  VERSION       = "2018.03.16",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
-  COPYRIGHT     = "(c) 2013-2016 AKBooer",
-  DOCUMENTATION = "",
+  COPYRIGHT     = "(c) 2013-2017 AKBooer",
+  DOCUMENTATION = "http://forum.micasaverde.com/index.php/topic,39261.0.html",
+  LICENSE       = [[
+  Copyright 2013-2017 AK Booer
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+]]
 }
 
+-- 2017.10.03  added test_from_file function
+
+-- 2018.03.15  remove command class 113 from being Security sensor CC 48 equivalent
+--             see: http://forum.micasaverde.com/index.php/topic,62975.0.html
 
 local loader  = require "openLuup.loader"
 local json    = require "openLuup.json"
@@ -593,7 +612,7 @@ local command_class = {
 
 }
  
-command_class ["113"] = command_class ["48"]      -- alarm
+--command_class ["113"] = command_class ["48"]      -- alarm
 --command_class ["156"] = command_class ["48"]      -- tamper switch
 
     
@@ -936,7 +955,7 @@ local function index_nodes (d)
   local index = {}
   for _,v in pairs (d) do 
     local node = v.id: match "^ZWayVDev_zway_.-(%d+)" 
-    if node then
+    if node and node ~= "0" then    -- 2017.10.04  ignore device "0" (which appeared in a new firmware update)
       v.meta = vDev_meta (v)        -- construct metadata
       local t = index[node] or {}
       t[#t+1] = v
@@ -1151,6 +1170,58 @@ local function ZWayVDev_API (ip, user, password)
   end
 end
 
+-----
+
+local function test_from_file (fname)
+  
+  local f = io.open (fname, 'r')
+  if not f then
+    print "error opening file"
+    return
+  end
+
+  local jdata = f:read "*a"
+  f: close()
+
+  local data, err = json.decode (jdata)
+  if not data then
+    print ("JSON error:", err)
+    return
+  end
+
+  local devices = data.devices
+
+  devices = data      -- for AKB data
+
+  if not devices then
+    print "no devices!"
+    return
+  end
+
+  local luupDevs = analyze (devices)
+
+--  local pretty = require "pretty"
+--  print (pretty(luupDevs))
+
+  local parent = {}
+	for _, ldv in ipairs(luupDevs) do
+    parent[#parent+1] = ldv
+    print (ldv.name, ldv.altid, ldv.upnp_file)
+	end
+  
+  
+--      local node = dev.id: match "^(%d+)"
+--      local handle = luup.chdev.start(dino);
+      
+--      getmetatable(dev).__index.handle_children = true       -- ensure parent handles Zwave actions
+ 
+--      -- child devices
+----      local this = luupDevs[node] or {devices = {}, variables = {}}   -- 2017.10.03 fix nil reference
+--      local this = luupDevs[node]
+--      for _, instance in ipairs (this.devices) do
+
+end
+
 
 -----------------------------------------
 --
@@ -1193,6 +1264,12 @@ function init(devNo)
     luup.register_handler (handler, 'z' .. devNo)
     
     local vDevs = Z.devices ()
+
+    -- device-specific ID for HTTP handler allows multiple plugin instances
+    handler = "HTTP_Z-Way_TEST_" .. devNo
+    _G[handler] = function () return json.encode (vDevs), "application/json" end
+    luup.register_handler (handler, 'test' .. devNo)
+    
     cclass_update = createChildren (devNo, vDevs)
     _G.updateChildren (vDevs)
   
@@ -1205,4 +1282,10 @@ function init(devNo)
 
 end
 	 
+-----
+--
+-- TESTING
+
+--test_from_file "zway/xxx.json"
+
 -----
