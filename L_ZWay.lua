@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 ABOUT = {
   NAME          = "L_ZWay",
-  VERSION       = "2018.03.16",
+  VERSION       = "2018.07.16",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2017 AKBooer",
@@ -28,6 +28,9 @@ ABOUT = {
 
 -- 2018.03.15  remove command class 113 from being Security sensor CC 48 equivalent
 --             see: http://forum.micasaverde.com/index.php/topic,62975.0.html
+-- 2018.07.16  name = dv.metrics.title, for @DesT
+
+
 
 local loader  = require "openLuup.loader"
 local json    = require "openLuup.json"
@@ -64,6 +67,9 @@ local SID = {          -- schema implementation or shorthand name ==> serviceId
     setpointCool  = "urn:upnp-org:serviceId:TemperatureSetpoint1_Cool",
  
  }
+
+-- NB: for thermostats, see @rigpapa's useful post:
+--     http://forum.micasaverde.com/index.php/topic,79510.0.html
 
 -- LUUP utility functions 
 
@@ -941,7 +947,8 @@ local function luupDevice (node, instances)
   return { 
     upnp_file = upnp_file,
     altid = altid,
-    name = name,
+--    name = name,
+    name = dv.metrics.title,      -- 2018.07.16, for @DesT
     node = node,
     devices = dev,
     variables = var,
@@ -1059,7 +1066,8 @@ local function createChildren(devNo, devices)
             local title = "%3s: %s %s %s"
             local metrics = instance.metrics
             local suffix = m.instance ~= '0' and m.instance or ''
-            local name = title: format (node, metrics.title: match "%w+",  m.devtype or '?', suffix)
+--            local name = title: format (node, metrics.title: match "%w+",  m.devtype or '?', suffix)
+            local name = metrics.title -- 2018.07.16
             updater[m.altid] = m
             appendZwayDevice (dino, handle, name, m.altid, m.upnp_file)
           end
