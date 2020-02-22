@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 ABOUT = {
   NAME          = "L_ZWay2",
-  VERSION       = "2020.02.22",
+  VERSION       = "2020.02.22b",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2020 AKBooer",
@@ -1175,8 +1175,11 @@ local function createChildren (bridgeDevNo, vDevs, room, OFFSET)
       local tstat = classes["64"][1]
       name = tstat.metrics.title
       updaters[tstat.meta.altid] = command_class.new (cloneId, tstat.meta)
-      local fmode = classes["68"][1]
-      updaters[fmode.meta.altid] = command_class.new (cloneId, fmode.meta)
+      local fmode = classes["68"]
+      if fmode then
+        fmode = fmode[1]
+        updaters[fmode.meta.altid] = command_class.new (cloneId, fmode.meta)
+      end
       local temp = classes["49"][1]
       updaters[temp.meta.altid] = command_class.new (cloneId, temp.meta)
       for _, setpoint in ipairs (classes["67"]) do
