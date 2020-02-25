@@ -4,7 +4,7 @@ module(..., package.seeall)
 
 ABOUT = {
   NAME          = "zway_cgi",
-  VERSION       = "2020.02.23",
+  VERSION       = "2020.02.25",
   DESCRIPTION   = "a WSAPI CGI proxy configuring the ZWay plugin",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2020 AKBooer",
@@ -69,7 +69,7 @@ that supports multiple sensors with different scales in one single command class
 
 -- given vDev structure, return altid, vtype, etc...
 --   ... node, instance, command_class, scale, sub_class, sub_scale, tail
-local NICS_pattern = "^(%d+)%-(%d+)%-(%d+)%-?(%d*)%-?(%d*)%-?(%d*)%-?(.-)$"
+local NICS_pattern = "^(%d+)%-(%d+)%-?(%d*)%-?(%d*)%-?(%d*)%-?(%d*)%-?(.-)$"
 local function NICS_etc (vDev)
   local vtype, altid = vDev.id: match "^ZWayVDev_(zway_%D*)(.+)" 
   if altid then 
@@ -141,24 +141,51 @@ local function bridge_post (form)
   
 end
 
+-- returns an ordered list grouped by instance
+-- NB: theres are openLuup vars, not ZWay ones!
+local function indexVarsByInstance (vars)
+  local index = {}
+  -- sort all the variable ids into instances
+  for _,v in ipairs (vars) do
+    local vtype, nics = v.name: match "zway_(%D*)(.*)"
+    nics = nics or ''
+    local node, instance, command_class, scale, sub_class, sub_scale, tail = nics: match (NICS_pattern)
+    if node and not tail: match "LastUpdate$" then
+      local x = index[instance] or {}
+      x[#x+1] = nics
+      index[instance] = x
+    end
+  end
+  local list = {}
+  for inst in pairs(index) do list[#list+1] = inst end
+  table.sort (list)
+  for i, inst in ipairs(list) do list[i] = index[inst] end
+--  print ((json.encode(list)))
+  return list
+end
 
 -- display bridge info as HTML table
 --       bridge = {id = n, offset = d.offset, dev = dev}
 local function bridge_form (bridge, action)
+  
+  -- find the direct children (should just be the Zwave nodes)
   local dev = bridge.dev
   local children = dev:get_children()
---  print ('', "#children", #children)
-  local title = xhtml.div {class = "w3-container w3-grey", 
-    xhtml.h3 {'[', bridge.id, '] ', dev.description,
-              xhtml.input {class = button_class .. "w3-pale-red",
-                  type="Submit", value="Commit", title="change child configuration"},
-              xhtml.input {class = button_class .. "w3-pale-green",
-                  type="Reset", title="reset child configuration"},
-    } }
-
   table.sort (children)
+--  print ('', "#children", #children)
+  
+  -- find ALL the descendants of the bridge (includes instance nodes and specified devices)
+  local current = luup.openLuup.bridge.all_descendants (bridge.id)
+  local currentIndexedByAltid = {}
+  for n,v in pairs(current) do 
+    if n > luup.openLuup.bridge.BLOCKSIZE then        -- ignore anything not in the block
+      currentIndexedByAltid[v.id] = n                 -- 'id' is actually altid!
+    end
+  end
+  
+  -- set up the HTML devices table
   local tbl = xhtml.table {class="w3-small w3-hoverable w3-border"}
-  tbl.header {"devNo", '', "altid", 'x', "device file", "name", ''}
+  tbl.header {{colspan=2, "devNo"}, {colspan=3, "altid"}, "device file", "name", ''}
   
   for _,n in ipairs (children) do
     local c = luup.devices[n]
@@ -171,31 +198,54 @@ local function bridge_form (bridge, action)
     
     local cvar = luup.variable_get (SID.ZWay, "Children", n) or ''
     local cs = {}
-    for alt in cvar: gmatch "[%-%w]+" do cs[alt] = true end   -- note specified children
+    for alt in cvar: gmatch "[%-%w]+" do cs[alt] = true end  -- individuals
     
     local altid = c.id
 --    print ('', altid, c.attributes.device_file, c.description)
-    tbl.row {n, '', altid, '', c.attributes.device_file or '', c.description}
+    
+    tbl.row {n, '', '', '', altid, c.attributes.device_file or '', c.description}
+    
     if c.attributes.device_file == DEV.combo then    
-      for _,v in ipairs (c.variables) do
-        local vtype, nics = v.name: match "zway_(%D*)(.*)"
-        nics = nics or ''
-        local node, instance, command_class, scale, sub_class, sub_scale, tail = nics: match (NICS_pattern)
-        if node and not tail: match "LastUpdate$" then
+      -- now go through each instance in order
+      local varsByInst = indexVarsByInstance (c.variables)
+      for _,vars in ipairs (varsByInst) do
+        
+        local vtype = ''    -- TODO: fix this!!!!
+        
+        if #varsByInst > 1 then     -- add row to show that we have multiple instances
+          local instAltid = vars[1]: match "^%d+%-%d+"
+          local instId = currentIndexedByAltid[instAltid]    -- find its device number
+          local d = luup.devices[instId]
+--          print (type(instId), instId, d)
+          local dfile = d and d.attributes.device_file or '' 
+          local name  = d and d.description or "Instance"
+          tbl.row {'', instId, '', '', instAltid, dfile, name}
+        end
+        
+        -- now go through all variables within the instance
+        for _, nics in ipairs (vars) do
           local checked = cs[nics] and nics or nil
           local dfile, dname
           local gdev = grandchild[nics]
           if checked and gdev then
             dfile, dname = gdev.attributes.device_file, gdev.description
           end
-          tbl.row {'', vtype, nics, 
+          tbl.row {'', '', '',
             xhtml.input {type="checkbox", name=nics, checked=checked}, 
+            nics, -- vtype,
             dfile, dname }
         end
       end
     end
-
   end
+  
+  local title = xhtml.div {class = "w3-container w3-grey", 
+    xhtml.h3 {'[', bridge.id, '] ', dev.description,
+              xhtml.input {class = button_class .. "w3-pale-red",
+                  type="Submit", value="Commit", title="change child configuration"},
+              xhtml.input {class = button_class .. "w3-pale-green",
+                  type="Reset", title="reset child configuration"},
+    } }
   
   return xhtml.div {class = "w3-panel",
     xhtml.form {class = "w3-container w3-margin-top",
