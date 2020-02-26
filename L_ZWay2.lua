@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 ABOUT = {
   NAME          = "L_ZWay2",
-  VERSION       = "2020.02.25",
+  VERSION       = "2020.02.26",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2020 AKBooer",
@@ -36,11 +36,13 @@ ABOUT = {
 --             ditto, CurrentSetpoint in command class 67
 --             see: https://community.getvera.com/t/zway-plugin/212312/40
 -- 2020.02.25  add intermediate instance nodes
+-- 2020.02.26  change node numbering scheme
 
 
 -----------------
 
 -- 2020.02.12  L_ZWay2 -- rethink of device presentation and numbering
+
 
 local json    = require "openLuup.json"
 local chdev   = require "openLuup.chdev"    -- NOT the same as the luup.chdev module! (special create fct)
@@ -705,16 +707,16 @@ function _G.updateChildren (d)
   for _,inst in pairs (D) do 
     local altid, vtype, node, instance, c_class = NICS_etc (inst)
     if node then
-      local zDevNo = OFFSET + node
+      local zDevNo = OFFSET + node * 10 + instance    -- determine device number from node and id
       -- set all the Vdev variables in the Zwave node devices
       local zDev = luup.devices[zDevNo] 
       if zDev then
         -- update device name, if changed
-        if altid == zDev.id 
-        and inst.metrics.title ~= zDev.description then
-          log (table.concat {"renaming device, old --> new: ", zDev.description, " --> ", inst.metrics.title})
-          zDev: rename (inst.metrics.title)
-        end
+--        if altid == zDev.id 
+--        and inst.metrics.title ~= zDev.description then
+--          log (table.concat {"renaming device, old --> new: ", zDev.description, " --> ", inst.metrics.title})
+--          zDev: rename (inst.metrics.title)
+--        end
         -- add the vDev variable info
         local id = vtype .. altid
         setVar (id, inst.metrics.level, SID.ZWay, zDevNo)
@@ -910,13 +912,13 @@ local function vDev_meta (v)
     local service   = SID[z[2]]
     local json_file = z[3]
     
-  --  local devtype = (json_file or upnp_file or ''): match "^D_(%u+%l*)"
+    local devtype = (json_file or upnp_file or ''): match "^D_(%u+%l*)"
 
     return {
       upnp_file = upnp_file,
       service   = service,
       json_file = json_file,
-  --    devtype   = devtype,
+      devtype   = devtype,
       altid     = altid,
       vtype     = vtype,
       node      = node,
@@ -1030,18 +1032,20 @@ local function luupDeviceOLD (node, instances)
 end
 --]=]
 
--- index virtual devices number by node number and build instance metadata
+-- index virtual devices number by node-instance number and build instance metadata
 -- also index all vDevs by altid
 local function index_nodes (d)
   local index = {}
   for _,v in pairs (d) do 
     local meta = vDev_meta (v) or {} -- construct metadata
     local node = meta.node
+    local instance = meta.instance
     if node and node ~= "0" then    -- 2017.10.04  ignore device "0" (appeared in new firmware update)
       v.meta = meta
-      local t = index[node] or {}   -- construct index
+      local n_i = table.concat {node, '-', instance}
+      local t = index[n_i] or {}   -- construct index
       t[#t+1] = v
-      index[node] = t
+      index[n_i] = t
     end
   end
   return index
@@ -1100,22 +1104,6 @@ local function index_by_command_class (vDevs)
   return classes
 end
 
--- returns an ordered list grouped by instance
-local function IndexOfvDevsByInstance (vDevs)
-  local index = {}
-  for _, vDev in ipairs (vDevs) do
-    local inst = vDev.meta.instance
-    local x = index[inst] or {}
-    x[#x+1] = vDev
-    index[inst] = x
-  end
-  local list = {}
-  for inst in pairs(index) do list[#list+1] = inst end
-  table.sort (list)
-  for i, inst in ipairs(list) do list[i] = index[inst] end   -- add sorted list
-  return list
-end
-
 
 ---  CONFIGURE DEVICES
 -- option child parameters forces new vDev children
@@ -1163,16 +1151,28 @@ local function configureDevice (id, name, ldv, updaters, child)
     upnp_file = v.meta.upnp_file
     name = v.metrics.title
     
-  elseif classes["49"] then                                 -- a multi-sensor combo
-    name = "multisensor #" .. id
-    for n, v in ipairs (classes["49"]) do
+  elseif classes["49"] and #classes["49"] > 1 then      -- a multi-sensor combo
+    local meta = classes["49"][1].meta
+    name = table.concat {"multi #", meta.node, '-', meta.instance}
+    local types = {}
+    for _, v in ipairs (classes["49"]) do
+      local scale = v.meta.devtype 
+      types[scale] = (types[scale] or 0) + 1
       child[v.meta.altid] = true                            -- force child creation
     end
+    local display = {}
+    for s in pairs (types) do display[#display+1] = s end
+    table.sort(display)
+    for i,s in ipairs (display) do display[i] = table.concat {s,':',types[s], ' '} end
+    luup.variable_set (SID.AltUI, "DisplayLine1", table.concat (display), id)
     
   elseif classes["50"] and #classes["50"] > 2 then          -- a power meter
     local v = classes["50"][1]
     upnp_file = v.meta.upnp_file
     name = v.metrics.title
+    for _, meter in ipairs (classes["50"]) do
+      updaters[meter.meta.altid] = command_class.new (id, meter.meta)
+    end
     
   elseif classes["37"] and #classes["37"] == classes.n then   -- just a bank of switches
     name = classes["37"][1].metrics.title
@@ -1207,7 +1207,9 @@ local function createChildren (bridgeDevNo, vDevs, room, OFFSET)
   local function validOrNewId (altid)
     local id = currentIndexedByAltid[altid]                 -- does it already exist?
     if not id then                                          -- no, ...
-      id = luup.openLuup.bridge.nextIdInBlock(OFFSET)       -- ...so get a new device number
+      -- ...so get a new device number, starting at halfway through the block
+      -- node/instance numbering only goes up to 2310
+      id = luup.openLuup.bridge.nextIdInBlock(OFFSET, 5000) 
     end
     return id
   end
@@ -1222,17 +1224,17 @@ local function createChildren (bridgeDevNo, vDevs, room, OFFSET)
     list[#list+1] = id   -- add to new list
     current[id] = nil    -- mark as done
   end
-    
-  local zDevs = index_nodes (vDevs)   -- structure into Zwave nodes with children
-  debug(json.encode(zDevs))
   
   --------------
   --
   -- first the Zwave node devices...
   --
+  local zDevs = index_nodes (vDevs)   -- structure into Zwave node-instances with children
+  debug(json.encode(zDevs))
   local updaters = {}
-  for Znode, ldv in pairs(zDevs) do
-    local ZnodeId = Znode + OFFSET
+  for nodeInstance, ldv in pairs(zDevs) do
+    local n,i = nodeInstance: match  "(%d+)%-(%d+)"
+    local ZnodeId = n * 10 + i + OFFSET
     N = N + 1                         -- count the nodes
     
     -- get specified children for this node
@@ -1244,51 +1246,35 @@ local function createChildren (bridgeDevNo, vDevs, room, OFFSET)
     -- default node parameters
     local parent = bridgeDevNo
     local id = ZnodeId
-    local name = "zNode #" .. Znode
-    local altid = Znode
+    local name = "zNode #" .. nodeInstance
+    local altid = nodeInstance
     local upnp_file = DEV.combo
+          
+    upnp_file, name = configureDevice (id, name, ldv, updaters, child)  -- note extra child param
+    checkDeviceExists (parent, id, name, altid, upnp_file, room)
     
-    -- analyze the virtual devices in each zDev to find number of instances
-    local instances = IndexOfvDevsByInstance(ldv)
-    if #instances > 1 then                                          -- we have multiple instances...
-      checkDeviceExists (parent, id, name, altid, upnp_file, room)  -- ...so node is a combo device   
-    end
-    
-    -- go through the instances, creating instance nodes if required
-    for _, vs in ipairs (instances) do
-      if #instances > 1 then                                    -- we have multiple instances...
-        local inst = vs[1].meta.instance                        -- ...so need an instance node
-        altid = table.concat {Znode, '-', inst}                 -- with this altid...
-        id = validOrNewId(altid)                                -- ...and this device number
-        parent = ZnodeId
-        name = "zInst #" .. altid
-      end
-      
-      upnp_file, name = configureDevice (id, name, vs, updaters, child)  -- note extra child param
-      checkDeviceExists (parent, id, name, altid, upnp_file, room)
-      
-      -- now any specified child devices...
-      -- ... by definition (a single vDev) they are singleton devices
-      for _, vDev in ipairs (vs) do
-        local meta = vDev.meta
-        local altid = meta.altid
-        local c_class = meta.c_class
-        if child[altid] then                                    -- this vDev should be a child device
-          local childId = validOrNewId(altid)                   -- ...with this device number
-          name = vDev.metrics.title                             -- use actual name
-          upnp_file = meta.upnp_file 
-          checkDeviceExists (id, childId, name, altid, upnp_file, room)  
-          updaters[altid] = command_class.new (childId, meta)   -- create specific updater
-          updated_children[#updated_children+1] = altid
-        elseif c_class == "128"then
-          updaters[altid] = command_class.new (ZnodeId, meta)   -- Znode holds battery info
-        end
+    -- now any specified child devices...
+    -- ... by definition (a single vDev) they are singleton devices
+    for _, vDev in ipairs (ldv) do
+      local meta = vDev.meta
+      local altid = meta.altid
+      local c_class = meta.c_class
+      if child[altid] then                                    -- this vDev should be a child device
+        local childId = validOrNewId(altid)                   -- ...with this device number
+        name = vDev.metrics.title                             -- use actual name
+        upnp_file = meta.upnp_file 
+        checkDeviceExists (id, childId, name, altid, upnp_file, room)  
+        updaters[altid] = command_class.new (childId, meta)   -- create specific updater
+        updated_children[#updated_children+1] = altid
+      elseif c_class == "128"then
+        updaters[altid] = command_class.new (ZnodeId, meta)   -- Znode holds battery info
       end
     end
     
     -- write back list of changed children
     table.sort (updated_children)
     updated_children = table.concat (updated_children, ', ')
+--    print ("update", updated_children)
     if children ~= updated_children then
       luup.variable_set (SID.ZWay, "Children", updated_children, ZnodeId) 
     end

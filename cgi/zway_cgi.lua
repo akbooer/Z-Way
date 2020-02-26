@@ -4,7 +4,7 @@ module(..., package.seeall)
 
 ABOUT = {
   NAME          = "zway_cgi",
-  VERSION       = "2020.02.25",
+  VERSION       = "2020.02.26",
   DESCRIPTION   = "a WSAPI CGI proxy configuring the ZWay plugin",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2020 AKBooer",
@@ -105,18 +105,19 @@ end
 --]]
 
 local function bridge_post (form)
-  local dev = luup.devices[tonumber(form.bridge)]
+  local devNo = tonumber(form.bridge)
+  local dev = luup.devices[devNo]
   if not dev then return end
   
-  -- collect all the ticked items by node
+  -- collect all the ticked items by node-instance
   local ticked = {}
   for nics, on in pairs (form) do
     if on == "on" then
-      local node = nics: match (NICS_pattern)
-      node = tonumber (node)
-      local x = ticked[node] or {}
+      local n, i = nics: match (NICS_pattern)
+      local n_i = table.concat {n, '-', i} 
+      local x = ticked[n_i] or {}
       x[#x+1] = nics
-      ticked[node] = x
+      ticked[n_i] = x
     end
   end
   
@@ -125,11 +126,11 @@ local function bridge_post (form)
   for _,n in ipairs (children) do
     local specified = luup.variable_get (SID.ZWay, "Children", n)
     if specified then
-      local node = n % luup.openLuup.bridge.BLOCKSIZE   -- extract node number from device number
-      local new = ticked[node]
+      local n_i = luup.devices[n].id    -- get the (alt)id
+      local new = ticked[n_i]
       if new then 
         table.sort(new)
-        new =  table.concat (ticked[node], ", ") 
+        new =  table.concat (ticked[n_i], ", ") 
       else
         new = ''  -- no children is the default
       end
