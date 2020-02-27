@@ -4,7 +4,7 @@ module(..., package.seeall)
 
 ABOUT = {
   NAME          = "zway_cgi",
-  VERSION       = "2020.02.26",
+  VERSION       = "2020.02.27",
   DESCRIPTION   = "a WSAPI CGI proxy configuring the ZWay plugin",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2020 AKBooer",
@@ -226,12 +226,12 @@ local function bridge_form (bridge, action)
         -- now go through all variables within the instance
         for _, nics in ipairs (vars) do
           local checked = cs[nics] and nics or nil
-          local dfile, dname
+          local dfile, dname, dnumber
           local gdev = grandchild[nics]
           if checked and gdev then
-            dfile, dname = gdev.attributes.device_file, gdev.description
+            dfile, dname, dnumber = gdev.attributes.device_file, gdev.description, gdev.attributes.id
           end
-          tbl.row {'', '', '',
+          tbl.row {'', '', dnumber or '',
             xhtml.input {type="checkbox", name=nics, checked=checked}, 
             nics, -- vtype,
             dfile, dname }
