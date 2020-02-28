@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 ABOUT = {
   NAME          = "L_ZWay2",
-  VERSION       = "2020.02.27",
+  VERSION       = "2020.02.28",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2020 AKBooer",
@@ -933,101 +933,6 @@ end
 -- BUILD LUUP DEVICE STRUCTURE
 --
 
-
---[=[
--- transform each node into some sort of Luup device structure with parents and children
-local function luupDeviceOLD (node, instances) 
-
-  -- split into devices and variables
-  local dev, var = {}, {}
-  local children = {}         -- count of children indexed by (shorthand) device type
-  for _, v in ipairs (instances) do
-    local t = v.meta.devtype
-    if t then
-      children[t] = (children[t] or 0) + 1
-      dev[#dev+1] = v
-    else
-      var[#var+1] = v
-    end
-  end
-      
-  -- create top-level device: three different sorts:
-  local Ndev = #dev
-  local upnp_file, altid, devtype, parameters
-  
-  ------------------------
-  -- a controller has no devices and is just a collection of buttons and switches or other services 
-  if Ndev == 0 then
-    upnp_file, altid, devtype = DEV.controller, var[1].meta.node, " Controller"
-    local txt = [[Define scene triggers to watch sl_SceneActivated]] ..
-                [[ with Lua Expression: new == "button_number"]]
-    parameters = table.concat { SID.controller, ',', "Scenes", '=', txt }
-    
-  ------------------------
-  -- a singleton device is a node with only one vDev device
-  elseif Ndev == 1 then
-    upnp_file, altid = dev[1].meta.upnp_file, dev[1].meta.altid 
-    
-  ------------------------
-  -- a combo device is a collection of more than one vDev device, and may have service variables
-  else
-    upnp_file, altid, devtype = DEV.combo, dev[1].meta.node, " Combo"  -- (the space is important)
-    local dimmers = children.Dimmable
-    local thermos = children.HVAC
-    
-    -- HOWEVER... 
-    
-    -- if there are lots of dimmers, ...
-    if dimmers and dimmers > 3 then           -- ... we'll asume that it's an RGB(W) switch
-      devtype = " RGB Controller" 
-      upnp_file = DEV.rgb
-      
-    -- if there are any HVAC services, ...
-    elseif thermos and thermos > 0 then       -- ... it's a thermostat
-      devtype = " Thermostat" 
-      upnp_file = "D_HVAC_ZoneThermostat1.xml"
-      local newdev = {}
-      for i, d in ipairs (dev) do             -- convert instance 0 devices to embeded variables
-        if d.meta.instance ~= "0" then 
-          newdev[#newdev+1] = d
-        else
-          var[#var+1] = d
-          d.meta.upnp_file = nil
-          d.meta.devtype = nil
-        end
-      end
-      dev = newdev
-      
-    -- otherwise...
-    else                                      -- ... it's just a vanilla combination device
-      local label = {}
-      for a,b in pairs(children) do
-        label[#label+1] = table.concat {a,':', b}
-      end
-      table.sort (label)
-      parameters = table.concat { SID.AltUI, ',', "DisplayLine1", '=', table.concat (label, ' ') }
-    end
-  end
-  
-  -- return structure with info for creating the top-level device
-  local dv = (dev[1] or var[1])
-  devtype = devtype or dv.meta.devtype or '?'
-  local name = ("%3s: %s %s"): format (node, dv.metrics.title: match "%w+", devtype) 
-  
-  return { 
-    upnp_file = upnp_file,
-    altid = altid,
---    name = name,
-    name = dv.metrics.title,      -- 2018.07.16, for @DesT
-    node = node,
-    devices = dev,
-    variables = var,
-    parameters = parameters,
-  } 
-
-end
---]=]
-
 -- index virtual devices number by node-instance number and build instance metadata
 -- also index all vDevs by altid
 local function index_nodes (d)
@@ -1086,6 +991,7 @@ end
 -- index list of vDevs by command class, saving altids of occurrences
 local dont_count = {
   ["0"] = true,         -- generic
+  ["1"] = true,         -- ???
   ["50"] = true,        -- power
   ["51"] = true,        -- switch colour
   ["128"] = true,       -- batteries
@@ -1095,10 +1001,14 @@ local function index_by_command_class (vDevs)
   local n = 0
   for _, ldv in pairs(vDevs) do
     local cc = ldv.meta.c_class
+    local scale = ldv.meta.scale
+    local ignore = dont_count[cc] or 
+        (cc == "113" and scale == "7" and ldv.meta.sub_class == "8")  -- tamper switch
+    if cc == "49" and scale == "4" then cc= "50" end   --  a class["50"]  -- (power)
     local x = classes[cc] or {}
     x[#x+1] = ldv
     classes[cc] = x
-    if not dont_count[cc] then n = n + 1 end
+    if not ignore then n = n + 1 end
   end
   classes.n  = n    -- total WITHOUT uncounted classes
   return classes
@@ -1115,13 +1025,19 @@ local function configureDevice (id, name, ldv, updaters, child)
   -- determine default device type
   local upnp_file = DEV.combo
   
-  if classes.n == 1 then                                 -- a singleton device
-    local vDev
+  if classes.n == 0 and classes["0"] and #classes["0"] > 0 then    -- just buttons?
+    upnp_file = DEV.controller
+    name = classes["0"][1].metrics.title
+    
+  elseif classes.n <= 1 then                                 -- a singleton device
+    local vDev = ldv[1]           -- there may be a better choice selected below
     for _,v in ipairs (ldv) do
       local cc = v.meta.c_class
-      if not dont_count[cc] then vDev = v end  -- find a useful command class
+      local scale = v.meta.c_class
+      local ignore = dont_count[cc] or (cc == "49" and scale == "4")
+        or (cc == "113" and scale == "7" and ldv.meta.sub_class == "8")  -- tamper switch
+      if not ignore then vDev = v end  -- find a useful command class
     end
-    vDev = vDev or ldv[1]
     local meta = vDev.meta
     upnp_file = meta.upnp_file 
     name = vDev.metrics.title                           -- use actual name
@@ -1151,9 +1067,10 @@ local function configureDevice (id, name, ldv, updaters, child)
     upnp_file = DEV.rgb
     name = "rgb #" .. id
     
-  elseif classes["37"] and #classes["37"] == 1        -- ... just one switch
-  and    classes["38"] and #classes["38"] == 1 then   -- ... and just one dimmer
-    local v = classes["38"][1]                        -- then go for the dimmer
+  elseif ((classes["37"] and #classes["37"] == 1)     -- ... just one switch
+  or      (classes["38"] and #classes["38"] == 1) )   -- ... OR just one dimmer
+  and not classes["49"] then                          -- ...but NOT any sensors
+    local v = (classes["38"] or {})[1] or classes["37"][1]            -- then go for the dimmer
     upnp_file = v.meta.upnp_file
     name = v.metrics.title
     
@@ -1193,9 +1110,8 @@ local function configureDevice (id, name, ldv, updaters, child)
       types[scale] = (types[scale] or 0) + 1
       child[v.meta.altid] = true                            -- force child creation
     end
-    for _, v in ipairs (classes["113"]) do    -- add motion sensors
+    for _, v in ipairs (classes["113"] or {}) do    -- add motion sensors
       if v.meta.sub_class ~= "8" then         -- not a tamper switch
-        local scale = v.meta.devtype 
         v.meta.upnp_file = DEV.motion
         types["Alarm"] = (types["Alarm"] or 0) + 1
         child[v.meta.altid] = true                            -- force child creation
