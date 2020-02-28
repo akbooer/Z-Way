@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 ABOUT = {
   NAME          = "L_ZWay2",
-  VERSION       = "2020.02.28",
+  VERSION       = "2020.02.28b",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2020 AKBooer",
@@ -205,13 +205,14 @@ vDev commands:
 4. ’exact’: sets the device to an exact value. This will be a temperature for thermostats or a percentage value of motor controls or dimmers
 --]]
 
+local NIaltid = "^%d+%-%d+$"      -- altid of just node-instance format (ie. not child vDev)
 
 local S_SwitchPower = {
     
     SetTarget = function (d, args)
       local value = on_or_off (args.newTargetValue or '0')
       local altid = luup.devices[d].id
-      altid = altid: match "^%d+$" and altid.."-0-37" or altid
+      altid = altid: match (NIaltid) and altid.."-37" or altid
       Z.command (altid, value)
     end,
     
@@ -224,7 +225,7 @@ local S_Dimming = {
       local level = tonumber (args.newLoadlevelTarget or '0')
       local value = "exact?level=" .. level
       local altid = luup.devices[d].id
-      altid = altid: match "^%d+$" and altid.."-0-38" or altid
+      altid = altid: match (NIaltid) and altid.."-38" or altid
       Z.command (altid, value)
     end,
     
@@ -298,7 +299,7 @@ local S_DoorLock = {
     SetTarget = function (d, args)
       local value = open_or_close (args.newTargetValue)
       local altid = luup.devices[d].id
-      altid = altid: match "^%d+$" and altid.."-0-98" or altid
+      altid = altid: match (NIaltid) and altid.."-98" or altid
       Z.command (altid, value)
     end,
  
@@ -452,15 +453,16 @@ local S_TemperatureSetpoint = {
         luup.variable_set (sid, "CurrentSetpoint", level, d)
         local value = "exact?level=" .. level
         local altid = luup.devices[d].id
-        if altid: match "^%d+$" then
+        altid = altid: match (NIaltid)
+        if altid then
           local suffix = {
-            [SID.setpoint]      = "-0-67",
-            [SID.setpointHeat]  = "-0-67-1",
-            [SID.setpointCool]  = "-0-67-2",
+            [SID.setpoint]      = "-67",
+            [SID.setpointHeat]  = "-67-1",
+            [SID.setpointCool]  = "-67-2",
           }
           altid = altid .. (suffix[args.serviceId] or '')
+          Z.command (altid, value)
         end
-        Z.command (altid, value)
       end
     end,
     
@@ -860,7 +862,7 @@ SensorMultilevel
   ["113"] = { "D_DoorSensor1.xml", S_Security },    -- Switch
   ["128"] = { nil, S_EnergyMetering },
   ["152"] = { "D_MotionSensor1.xml", S_Security },
-  ["156"] = { nil, S_Security },    -- Tamper switch?
+  ["156"] = { "D_MotionSensor1.xml", S_Security },    -- Tamper switch?
 
 
 -- D_Siren1.xml
@@ -1014,13 +1016,18 @@ local function index_by_command_class (vDevs)
   return classes
 end
 
-
 ---  CONFIGURE DEVICES
 -- optional child parameters forces new vDev children
 local function configureDevice (id, name, ldv, updaters, child)
   child = child or {}
   local classes = index_by_command_class (ldv)
 --    print (json.encode {node = id, classes = classes})
+
+  local function add_updater (v)
+    local meta = v.meta
+    updaters[meta.altid] = command_class.new (id, meta)
+    return meta.upnp_file, v.metrics.title
+  end
   
   -- determine default device type
   local upnp_file = DEV.combo
@@ -1028,6 +1035,7 @@ local function configureDevice (id, name, ldv, updaters, child)
   if classes.n == 0 and classes["0"] and #classes["0"] > 0 then    -- just buttons?
     upnp_file = DEV.controller
     name = classes["0"][1].metrics.title
+    -- TODO: some work here on updaters
     
   elseif classes.n <= 1 then                                 -- a singleton device
     local vDev = ldv[1]           -- there may be a better choice selected below
@@ -1038,68 +1046,60 @@ local function configureDevice (id, name, ldv, updaters, child)
         or (cc == "113" and scale == "7" and ldv.meta.sub_class == "8")  -- tamper switch
       if not ignore then vDev = v end  -- find a useful command class
     end
-    local meta = vDev.meta
-    upnp_file = meta.upnp_file 
-    name = vDev.metrics.title                           -- use actual name
-    local altid = meta.altid                                    -- use actual vDev id
-    updaters[altid] = command_class.new (id, meta)    -- create specific updater
+    upnp_file, name = add_updater (vDev)                    -- create specific updater
     
   elseif classes["64"] and classes["67"] and classes["49"] then    -- a thermostat
     -- may have temp sensor [49], fan speed [68], setpoints [67], ...
     -- ... operating state, operating mode, energy metering, ...
 -- command_class ["68"] Fan_mode
-    upnp_file = DEV.thermos
     local tstat = classes["64"][1]
-    name = tstat.metrics.title
-    updaters[tstat.meta.altid] = command_class.new (id, tstat.meta)
+    upnp_file, name = add_updater (tstat)
     local fmode = classes["68"]
     if fmode then
-      fmode = fmode[1]
-      updaters[fmode.meta.altid] = command_class.new (id, fmode.meta)
+      add_updater(fmode[1])              -- TODO: extra fan modes
     end
-    local temp = classes["49"][1]
-    updaters[temp.meta.altid] = command_class.new (id, temp.meta)
+    local temp = classes["49"]
+    add_updater(temp[1])
     for _, setpoint in ipairs (classes["67"]) do
-      updaters[setpoint.meta.altid] = command_class.new (id, setpoint.meta)
+      add_updater(setpoint)
     end
     
-  elseif classes["38"] and #classes["38"] > 3 then    -- ... we'll assume that it's an RGB(W) switch
-    upnp_file = DEV.rgb
-    name = "rgb #" .. id
+--  elseif classes["38"] and #classes["38"] > 3 then    -- ... we'll assume that it's an RGB(W) switch
+--    upnp_file = DEV.rgb
+--    name = "rgb #" .. id
     
   elseif ((classes["37"] and #classes["37"] == 1)     -- ... just one switch
   or      (classes["38"] and #classes["38"] == 1) )   -- ... OR just one dimmer
   and not classes["49"] then                          -- ...but NOT any sensors
     local v = (classes["38"] or {})[1] or classes["37"][1]            -- then go for the dimmer
-    upnp_file = v.meta.upnp_file
-    name = v.metrics.title
+    upnp_file, name = add_updater(v)
     
   elseif classes["48"] and #classes["48"] == 1 then   -- ... just one sensor
     local v = classes["48"][1]
-    upnp_file = v.meta.upnp_file
-    name = v.metrics.title
+    upnp_file, name = add_updater (v)
     
   elseif classes["50"] and classes.n == 0 then    -- no other devices, so a power meter
     local v = classes["50"][1]
     upnp_file = v.meta.upnp_file
     name = v.metrics.title
+    -- updaters are set at the end of this if-then-elseif statement
     
-  elseif classes["37"] and #classes["37"] == classes.n then   -- just a bank of switches
-    name = classes["37"][1].metrics.title
+--  elseif classes["37"] and #classes["37"] == classes.n then   -- just a bank of switches
+--    name = classes["37"][1].metrics.title
+--    -- how to handle multiple switches ???
     
   elseif classes["102"] and #classes["102"] == 1 then         -- door lock (barrier)
     local v = classes["102"][1]
-    upnp_file = v.meta.upnp_file
-    name = v.metrics.title
+    upnp_file, name = add_updater (v)
     
   elseif classes["98"] and #classes["98"] == 1 then         -- door lock
     local v = classes["98"][1]
-    upnp_file = v.meta.upnp_file
-    name = v.metrics.title
+    upnp_file, name = add_updater(v)
     
   elseif classes["113"] and #classes["113"] == classes.n then   -- barrier
-    upnp_file = DEV.motion
-    name = classes["113"][1].metrics.title
+    local v = classes["113"][1]    -- TODO: how to cope with multple motions??
+    upnp_file, name = add_updater (v)
+    upnp_file = DEV.motion      -- override default
     
   elseif classes["49"] and #classes["49"] > 1 then      -- a multi-sensor combo
     local meta = classes["49"][1].meta
@@ -1127,14 +1127,12 @@ local function configureDevice (id, name, ldv, updaters, child)
   -- power meter service variables (for any device)
   if classes["50"] then
     for _, meter in ipairs (classes["50"]) do
-      updaters[meter.meta.altid] = command_class.new (id, meter.meta)
+      add_updater (meter)
     end
   end
   
   if classes["128"] then
-    for _, battery in ipairs (classes["128"]) do
-      updaters[battery.meta.altid] = command_class.new (id, battery.meta)
-    end
+    add_updater (classes["128"][1])
   end
   
   return upnp_file, name
