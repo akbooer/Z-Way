@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 ABOUT = {
   NAME          = "L_ZWay2",
-  VERSION       = "2020.02.29",
+  VERSION       = "2020.02.29b",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2020 AKBooer",
@@ -84,6 +84,7 @@ local SID = {          -- schema implementation or shorthand name ==> serviceId
     rgb         = "urn:micasaverde-com:serviceId:Color1",
     
     switch      = "urn:upnp-org:serviceId:SwitchPower1",
+    dimmer      = "urn:upnp-org:serviceId:Dimming1",
     
     setpoint      = "urn:upnp-org:serviceId:TemperatureSetpoint1",
     setpointHeat  = "urn:upnp-org:serviceId:TemperatureSetpoint1_Heat",
@@ -234,6 +235,7 @@ local S_Dimming = {
       local altid = luup.devices[d].id
       altid = altid: match (NIaltid) and altid.."-38" or altid
       local value = "exact?level=" .. level
+      debug (value)
       Z.command (altid, value)
     end,
     
@@ -539,7 +541,7 @@ local command_class = {
     
     -- scene controller
     local dev = luup.devices[d]
-    if dev.device_type == DEV.controller then   -- this is the Luup device type, not the vDev
+    if dev.attributes.device_file == DEV.controller then   -- this is the Luup device file
       local click = inst.updateTime
 --      setVar ("LastUpdate_" .. meta.altid, click, SID.ZWay, d)
       if click ~= meta.click then -- force variable updates
@@ -547,8 +549,8 @@ local command_class = {
         local time  = os.time()     -- "◷" == json.decode [["\u25F7"]]
 --        local date  = os.date ("◷ %Y-%m-%d %H:%M:%S", time): gsub ("^0",'')
         
-        luup.variable_set (SID[S_SceneController], "sl_SceneActivated", scene, d)
-        luup.variable_set (SID[S_SceneController], "LastSceneTime",time, d)
+        luup.variable_set (SID.controller, "sl_SceneActivated", scene, d)
+        luup.variable_set (SID.controller, "LastSceneTime",time, d)
         
 --        if time then luup.variable_set (SID.AltUI, "DisplayLine1", date,  d) end
 --        luup.variable_set (SID.AltUI, "DisplayLine2", "Last Scene: " .. scene, d)
@@ -1039,6 +1041,10 @@ local function configureDevice (id, name, ldv, updaters, child)
     upnp_file = DEV.controller
     name = classes["0"][1].metrics.title
     -- TODO: some work here on class["0"] updaters
+    for _,button in ipairs (classes["0"]) do
+--      print ("adding", button.metrics.title)
+      add_updater (button)    -- should work for Minimote, at least
+    end
     
   elseif classes.n <= 1 then                                 -- a singleton device
     local vDev = ldv[1]           -- there may be a better choice selected below
