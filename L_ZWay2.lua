@@ -210,27 +210,16 @@ vDev commands:
 
 local NIaltid = "^%d+%-%d+$"      -- altid of just node-instance format (ie. not child vDev)
 
-local S_SwitchPower = {
-    
-    SetTarget = function (d, args)
-      local level = args.newTargetValue or '0'
-      debug (("SetTarget: newTargetValue=%s (type %s)"): format (level, type(level)))
-      luup.variable_set (SID.switch, "Target", (level == '0') and '0' or '1', d)
-      local altid = luup.devices[d].id
-      altid = altid: match (NIaltid) and altid.."-37" or altid
-      local value = on_or_off (level)
-      Z.command (altid, value)
-    end,
-    
-  }
-
-
 local S_Dimming = {
-    
+
     SetLoadLevelTarget = function (d, args)
       local level = tonumber (args.newLoadlevelTarget or '0')
       debug ("SetLoadLevelTarget: newLoadlevelTarget=" .. level)
       luup.variable_set (SID.switch, "Target", (level == '0') and '0' or '1', d)
+      if level >=100 then
+        level = 100
+        value = 255
+      end
       luup.variable_set (SID.dimmer, "LoadLevelTarget", level, d)
       local altid = luup.devices[d].id
       altid = altid: match (NIaltid) and altid.."-38" or altid
@@ -238,8 +227,36 @@ local S_Dimming = {
       debug (value)
       Z.command (altid, value)
     end,
-    
+
   }
+
+  local S_SwitchPower = {
+
+      SetTarget = function (d, args)
+        local level = args.newTargetValue or '0'
+        debug (("SetTarget: newTargetValue=%s (type %s)"): format (level, type(level)))
+        luup.variable_set (SID.switch, "Target", (level == '0') and '0' or '1', d)
+        local altid = luup.devices[d].id
+        local value = on_or_off (level)
+        local checkdimm = luup.variable_get(SID.dimmer, "LoadLevelTarget", d)
+        if checkdimm then
+          altid = altid: match (NIaltid) and altid.."-38" or altid
+          if tonumber(level) == 1 then
+            level = 100
+            value = 255
+          else
+            level = 0
+            value = 0
+          end
+          luup.variable_set(SID.dimmer, "LoadLevelTarget", level, d)
+          S_Dimming.SetLoadLevelTarget(d, {newLoadlevelTarget = value})
+        else
+          altid = altid: match (NIaltid) and altid.."-37" or altid
+          Z.command (altid, value)
+        end
+      end,
+
+    }
 
 
 local S_HaDevice = {
