@@ -4,10 +4,10 @@ module(..., package.seeall)
 
 ABOUT = {
   NAME          = "zway_cgi",
-  VERSION       = "2020.02.22",
+  VERSION       = "2020.02.28",
   DESCRIPTION   = "a WSAPI CGI proxy configuring the ZWay plugin",
   AUTHOR        = "@akbooer",
-  COPYRIGHT     = "(c) 2013-2016 AKBooer",
+  COPYRIGHT     = "(c) 2013-2020 AKBooer",
   DOCUMENTATION = "",
   LICENSE       = [[
   Copyright 2013-2020 AK Booer
@@ -30,37 +30,29 @@ ABOUT = {
 -- 2016.10.17  original version
 
 -- 2020.02.16  update for I_ZWay2 device configuration
+-- 2020.02.23  handle POST request to reconfigure ZWay child devices
+
+
 local wsapi = require "openLuup.wsapi" 
 local xml   = require "openLuup.xml"
+local json  = require "openLuup.json"
 
 local xhtml = xml.createHTMLDocument ()       -- factory for all HTML tags
 
 local _log    -- defined from WSAPI environment as wsapi.error:write(...) in run() method.
 
+local DEV = {
+    combo   = "D_ComboDevice1.xml",
+  }
+
 local SID = {
     ZWay    = "urn:akbooer-com:serviceId:ZWay1",
   }
-  
--- simple proxy 
---[[
-local ZWay = require "L_ZWay"
 
-function run(wsapi_env)
-  
+local button_class = "w3-button w3-border w3-margin w3-round-large "
+
+--[[  
   local status, txt = ZWay.HTTP_request (wsapi_env.SCRIPT_NAME)
-  
-  local ctype = (status == 200) and "application/json" or "text/plain" 
-  local headers = { ["Content-Type"] = ctype }
-  txt = txt or ''
-  
-  local function content()
-    local result = txt
-    txt = nil
-    return result
-  end
-
-  return 200, headers, content
-end
 --]]
 
 --[[
@@ -77,7 +69,7 @@ that supports multiple sensors with different scales in one single command class
 
 -- given vDev structure, return altid, vtype, etc...
 --   ... node, instance, command_class, scale, sub_class, sub_scale, tail
-local NICS_pattern = "^(%d+)%-(%d+)%-(%d+)%-?(%d*)%-?(%d*)%-?(%d*)%-?(.-)$"
+local NICS_pattern = "^(%d+)%-(%d+)%-?(%d*)%-?(%d*)%-?(%d*)%-?(%d*)%-?(.-)$"
 local function NICS_etc (vDev)
   local vtype, altid = vDev.id: match "^ZWayVDev_(zway_%D*)(.+)" 
   if altid then 
@@ -100,47 +92,168 @@ local function find_ZWay_bridge ()
   return bridge
 end
 
--- display bridge info as HTML table
---       bridge = {id = n, offset = d.offset, dev = dev}
-local function show_bridge (bridge)
-  local dev = bridge.dev
-  local children = dev:get_children()
---  print ('', "#children", #children)
-  local title = xhtml.div {class = "w3-container w3-grey", 
-    xhtml.h3 {'[', bridge.id, '] ', dev.description} }
+-- deal with posted form with new child configuration
+-- decoded form data looks like:
+--[[
+{
+  "82-0-49-5":"on",
+  "83-0-49-1":"on",
+  "83-0-49-3":"on",
+  "83-0-49-5":"on",
+  "bridge":"23"
+}
+--]]
 
-  local D = luup.devices
-  table.sort (children)
-  local tbl = xhtml.table {class="w3-small w3-hoverable w3-border"}
-  tbl.header {"devNo", '', "altid", 'x', "device file", "node", ''}
+local function bridge_post (form)
+  local devNo = tonumber(form.bridge)
+  local dev = luup.devices[devNo]
+  if not dev then return end
   
---  local dropdowns = xhtml.div {}
-  for _,n in ipairs (children) do
-    local c = luup.devices[n]
-    local cvar = luup.variable_get (SID.ZWay, "Children", n) or ''
-    local cs = {}
-    for alt in cvar: gmatch "[%-%w]+" do cs[alt] = true end   -- note specified children
-    
-    local altid = c.id
-    print ('', altid, c.description)
-    tbl.row {n, '', altid, '', c.attributes.device_file or '', c.description}
-    for _,v in ipairs (c.variables) do
-      local vtype, nics = v.name: match "zway_(%D*)(.*)"
-      nics = nics or ''
-      local node, instance, command_class, scale, sub_class, sub_scale, tail = nics: match (NICS_pattern)
-      if node and not tail: match "LastUpdate$" then
-        local checked = cs[nics] and nics or nil
-        tbl.row {'', vtype, nics, xhtml.input {type = "checkbox", checked = checked} }
-      end
+  -- collect all the ticked items by node-instance
+  local ticked = {}
+  for nics, on in pairs (form) do
+    if on == "on" then
+      local n, i = nics: match (NICS_pattern)
+      local n_i = table.concat {n, '-', i} 
+      local x = ticked[n_i] or {}
+      x[#x+1] = nics
+      ticked[n_i] = x
     end
---    dropdowns[#dropdowns+1] = xhtml.div { --class = "w3-dropdown-hover", 
---      style="clear:both; float:left",
---      c.description , xhtml.div {tbl} } -- {class = "w3-dropdown-content", tbl} }
-
   end
   
+  -- update all the Children variables in the nodes
+  local children = dev:get_children()   -- get the device numbers of the bridge node devices
+  for _,n in ipairs (children) do
+    local specified = luup.variable_get (SID.ZWay, "Children", n)
+    if specified then
+      local n_i = luup.devices[n].id    -- get the (alt)id
+      local new = ticked[n_i]
+      if new then 
+        table.sort(new)
+        new =  table.concat (ticked[n_i], ", ") 
+      else
+        new = ''  -- no children is the default
+      end
+      if specified ~= new then    -- it's changed! so update
+        luup.variable_set (SID.ZWay, "Children", new, n) 
+      end
+    end
+  end
+  
+end
+
+-- returns an ordered list grouped by instance
+-- NB: theres are openLuup vars, not ZWay ones!
+local function indexVarsByInstance (vars)
+  local index = {}
+  -- sort all the variable ids into instances
+  for _,v in ipairs (vars) do
+    local vtype, nics = v.name: match "zway_(%D*)(.*)"
+    nics = nics or ''
+    local node, instance, command_class, scale, sub_class, sub_scale, tail = nics: match (NICS_pattern)
+    if node and not tail: match "LastUpdate$" then
+      local x = index[instance] or {}
+      x[#x+1] = nics
+      index[instance] = x
+    end
+  end
+  local list = {}
+  for inst in pairs(index) do list[#list+1] = inst end
+  table.sort (list)
+  for i, inst in ipairs(list) do list[i] = index[inst] end
+--  print ((json.encode(list)))
+  return list
+end
+
+-- display bridge info as HTML table
+--       bridge = {id = n, offset = d.offset, dev = dev}
+local function bridge_form (bridge, action)
+  
+  -- find the direct children (should just be the Zwave nodes)
+  local dev = bridge.dev
+  local children = dev:get_children()
+  table.sort (children)
+--  print ('', "#children", #children)
+  
+  -- find ALL the descendants of the bridge (includes instance nodes and specified devices)
+  local current = luup.openLuup.bridge.all_descendants (bridge.id)
+  local currentIndexedByAltid = {}
+  for n,v in pairs(current) do 
+    if n > luup.openLuup.bridge.BLOCKSIZE then        -- ignore anything not in the block
+      currentIndexedByAltid[v.id] = n                 -- 'id' is actually altid!
+    end
+  end
+  
+  -- set up the HTML devices table
+  local tbl = xhtml.table {class="w3-small w3-hoverable w3-border"}
+  tbl.header {{colspan=2, "devNo"}, {colspan=3, "altid"}, "device file", "name", ''}
+  
+  for _,n in ipairs (children) do
+    local c = luup.devices[n]
+    local g = c:get_children()      -- get grandchildren
+    local grandchild = {}           -- index by altid
+    for _, gc in ipairs (g) do
+      local gdev = luup.devices[gc]
+      grandchild[gdev.id] = gdev
+    end
+    
+    local cvar = luup.variable_get (SID.ZWay, "Children", n) or ''
+    local cs = {}
+    for alt in cvar: gmatch "[%-%w]+" do cs[alt] = true end  -- individuals
+    
+    local altid = c.id
+--    print ('', altid, c.attributes.device_file, c.description)
+    
+    tbl.row {n, '', '', '', altid, c.attributes.device_file or '', c.description}
+    
+    if c.attributes.device_file == DEV.combo then    
+      -- now go through each instance in order
+      local varsByInst = indexVarsByInstance (c.variables)
+      for _,vars in ipairs (varsByInst) do
+        
+        local vtype = ''    -- TODO: fix this!!!!
+        
+        if #varsByInst > 1 then     -- add row to show that we have multiple instances
+          local instAltid = vars[1]: match "^%d+%-%d+"
+          local instId = currentIndexedByAltid[instAltid]    -- find its device number
+          local d = luup.devices[instId]
+--          print (type(instId), instId, d)
+          local dfile = d and d.attributes.device_file or '' 
+          local name  = d and d.description or "Instance"
+          tbl.row {'', instId, '', '', instAltid, dfile, name}
+        end
+        
+        -- now go through all variables within the instance
+        for _, nics in ipairs (vars) do
+          local checked = cs[nics] and nics or nil
+          local dfile, dname, dnumber
+          local gdev = grandchild[nics]
+          if checked and gdev then
+            dfile, dname, dnumber = gdev.attributes.device_file, gdev.description, gdev.attributes.id
+          end
+          tbl.row {'', '', dnumber or '',
+            xhtml.input {type="checkbox", name=nics, checked=checked}, 
+            nics, -- vtype,
+            dfile, dname }
+        end
+      end
+    end
+  end
+  
+  local title = xhtml.div {class = "w3-container w3-grey", 
+    xhtml.h3 {'[', bridge.id, '] ', dev.description,
+              xhtml.input {class = button_class .. "w3-pale-red",
+                  type="Submit", value="Commit", title="change child configuration"},
+              xhtml.input {class = button_class .. "w3-pale-green",
+                  type="Reset", title="reset child configuration"},
+    } }
+  
   return xhtml.div {class = "w3-panel",
-    xhtml.div {class = "w3-panel", title, tbl } }
+    xhtml.form {class = "w3-container w3-margin-top",
+      action=action, 
+      method="post",
+      xhtml.input {type = "hidden", name="bridge", value = bridge.id},
+      title, tbl } }
 end
 
 ---------
@@ -153,16 +266,21 @@ function run(wsapi_env)
   
   local req = wsapi.request.new (wsapi_env)   -- use request library to get object with useful methods
   local res = wsapi.response.new ()           -- and the response library to build the response!
-    
-  local h = xml.createHTMLDocument "ZWay-config"
+  
+  -- deal with POST of form data
+  if req.method == "POST" then
+    bridge_post (req.POST)
+  end
   
   -- find the ZWay bridges
-
+  --       bridge = {id = n, offset = d.offset, dev = dev}
   local bridges = find_ZWay_bridge ()    
   
+  -- create the web page
+  local h = xml.createHTMLDocument "ZWay-config"
   local d = h.div {class = "w3=container"}
   for _, b in ipairs(bridges) do
-    local tbl = show_bridge (b)
+    local tbl = bridge_form (b, req.script_name)
     d[#d+1] = tbl
   end
     
@@ -171,7 +289,7 @@ function run(wsapi_env)
     h.link {rel="stylesheet", href="https://www.w3schools.com/w3css/4/w3.css"},
     h.div {class = "w3-grey", 
       h.div {class = "w3-bar", h.h2 "Device configuration for ZWay plugin"} },
-    d }
+      d } 
     
   res:write (tostring(h))
   res:content_type "text/html" 
