@@ -39,6 +39,7 @@ ABOUT = {
 -- 2020.02.26  change node numbering scheme
 -- 2020.03.02  significant improvements to dimmer handling thanks to @rafale77
 
+
 -----------------
 
 -- 2020.02.12  L_ZWay2 -- rethink of device presentation and numbering
@@ -214,9 +215,10 @@ vDev commands:
 local NIaltid = "^%d+%-%d+$"      -- altid of just node-instance format (ie. not child vDev)
 
 local S_SwitchPower = {
-  ---------------
-  -- 2020.03.02   thanks to @rafale77 for extensive testing and code changes
-  --
+
+    ---------------
+    -- 2020.03.02   thanks to @rafale77 for extensive testing and code changes
+    --
     SetTarget = function (d, args)
       local level = args.newTargetValue or '0'
       luup.variable_set (SID.switch, "Target", (level == '0') and '0' or '1', d)
@@ -243,11 +245,12 @@ local S_SwitchPower = {
 
 
 local S_Dimming = {
-  ---------------
-  -- 2020.03.02   thanks to @rafale77 for extensive testing and code changes
-  --
+
+    ---------------
+    -- 2020.03.02   thanks to @rafale77 for extensive testing and code changes
+    --
     SetLoadLevelTarget = function (d, args)
-      local level = tonumber (args.newLoadlevelTarget or '0')
+      local level = args.newLoadlevelTarget or '0'
       luup.variable_set (SID.switch, "Target", (level == '0') and '0' or '1', d)
       luup.variable_set (SID.dimmer, "LoadLevelTarget", level, d)
       local altid = luup.devices[d].id
@@ -585,8 +588,7 @@ local command_class = {
     local level = tonumber (inst.metrics.level) or 0
     setVar ("LoadLevelStatus", level, meta.service, d)
     local status = (level > 0 and "1") or "0"
-    setVar ("Status", status, SID[S_SwitchPower], d)      -- *********************
-  end,
+    setVar ("Status", status, SID[S_SwitchPower], d)
 
   -- binary sensor
   ["48"] = function (d, inst)
@@ -948,8 +950,8 @@ end
 -- also index all vDevs by altid
 -- also index locations (rooms) by node-instance
 local function index_nodes (d)
-local room_index = setmetatable ({}, {__index = function() return OFFSET end})   -- default to room '0'
   local index = {}
+  local room_index = setmetatable ({}, {__index = function() return OFFSET end})   -- default to room '0'
   for _,v in pairs (d) do
     local meta = vDev_meta (v) or {} -- construct metadata
     local node = meta.node
@@ -1212,15 +1214,14 @@ local function createChildren (bridgeDevNo, vDevs, room, OFFSET)
   end
 
   -- create ZWay room names
-   local function clone_rooms(vDevs)
-     for _, v in pairs (vDevs) do
-       local loc = v.location or 0
-       if loc > 0 then
-         luup.rooms[loc+OFFSET] = v.locationName or ("ZWay Room " .. loc)  -- ensure room exists
-       end
-     end
-   end
-
+  local function clone_rooms(vDevs)
+    for _, v in pairs (vDevs) do
+      local loc = v.location or 0
+      if loc > 0 then
+        luup.rooms[loc+OFFSET] = v.locationName or ("ZWay Room " .. loc)  -- ensure room exists
+      end
+    end
+  end
 
   --------------
   --
