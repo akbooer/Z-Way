@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 ABOUT = {
   NAME          = "L_ZWay2",
-  VERSION       = "2020.02.29b",
+  VERSION       = "2020.03.03",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2020 AKBooer",
@@ -37,7 +37,7 @@ ABOUT = {
 --             see: https://community.getvera.com/t/zway-plugin/212312/40
 -- 2020.02.25  add intermediate instance nodes
 -- 2020.02.26  change node numbering scheme
-
+-- 2020.03.02  significant improvements to dimmer handling thanks to @rafale77
 
 -----------------
 
@@ -58,6 +58,9 @@ local cclass_update   -- table of command_class updaters indexed by altid
 local devNo     -- out device number
 local OFFSET    -- bridge offset for child devices
 local POLLRATE  -- poll rate for Zway devices
+
+local CLONEROOMS  --
+local NAMEDEVICES --
 
 local service_schema = {}    -- serviceId ==> schema implementation
 
@@ -203,19 +206,20 @@ local Application  = {
 --[[
 vDev commands:
 1. ’update’: updates a sensor value
-2. ’on’: turns a device on. Only valid for binary commands
-3. ’off’: turns a device off. Only valid for binary commands
+2. ’on’: turns a device on
+3. ’off’: turns a device off
 4. ’exact’: sets the device to an exact value. This will be a temperature for thermostats or a percentage value of motor controls or dimmers
 --]]
 
 local NIaltid = "^%d+%-%d+$"      -- altid of just node-instance format (ie. not child vDev)
 
 local S_SwitchPower = {
-
+  ---------------
+  -- 2020.03.02   thanks to @rafale77 for extensive testing and code changes
+  --
     SetTarget = function (d, args)
       local level = args.newTargetValue or '0'
       luup.variable_set (SID.switch, "Target", (level == '0') and '0' or '1', d)
-      debug (("SetTarget: newTargetValue=%s (type %s)"): format (level, type(level)))
       local altid = luup.devices[d].id
       local value = on_or_off (level)
       local checkdimm = luup.variable_get(SID.dimmer, "LoadLevelTarget", d)
@@ -239,16 +243,16 @@ local S_SwitchPower = {
 
 
 local S_Dimming = {
-
+  ---------------
+  -- 2020.03.02   thanks to @rafale77 for extensive testing and code changes
+  --
     SetLoadLevelTarget = function (d, args)
       local level = tonumber (args.newLoadlevelTarget or '0')
-      debug ("SetLoadLevelTarget: newLoadlevelTarget=" .. level)
       luup.variable_set (SID.switch, "Target", (level == '0') and '0' or '1', d)
       luup.variable_set (SID.dimmer, "LoadLevelTarget", level, d)
       local altid = luup.devices[d].id
       altid = altid: match (NIaltid) and altid.."-38" or altid
       local value = "exact?level=" .. level
-      debug (value)
       Z.command (altid, value)
     end,
 
@@ -333,15 +337,12 @@ local S_EnergyMetering  = {
 
     ResetKWH = function (d)
       local altid = luup.devices[d].id
-      local node = "^%d+"
-      local instance = "%d+$"
-      local id = altid: match (node)
-      local inst = altid: match (instance)
+      local id, inst = altid: match "^(%d+)%-(%d+)$"
       local cc = 50     --command class
       local cmd = "Reset()"
       Z.zwcommand(id, inst, cc, cmd)
     end,
-    
+
 }
 local S_Generic         = { }
 local S_Humidity        = { }
@@ -361,19 +362,14 @@ local S_Unknown         = { }   -- "catch-all" service
 local S_HVAC_FanMode = {
     --	Auto Low,On Low,Auto High,On High,Auto Medium,On Medium,Circulation,Humidity and circulation,Left and right,Up and down,Quite
   SetMode = function (d, args)
-    local valid = {Auto = true, ContinuousOn = true, PeriodicOn = true} -- auto, on, cycle
     local value = args.NewMode
     local altid = luup.devices[d].id
-    local node = "^%d+"
-    local instance = "%d+$"
-    local id = altid: match (node)
-    local inst = altid: match (instance)
+    local id, inst = altid: match "^(%d+)%-(%d+)$"
     local cc = 68     --command class
     local sid = args.serviceId
-    if valid[value] then
-      local VtoZ = {Auto = "Set(1,0)", ContinuousOn = "Set(1,1)", PeriodicOn = "Set(1,0)"}
-      local cmd = VtoZ[value]
-      local cmd = VtoZ[value]
+    local VtoZ = {Auto = "Set(1,0)", ContinuousOn = "Set(1,1)", PeriodicOn = "Set(1,0)"}
+    local cmd = VtoZ[value]
+    if cmd then
       Z.zwcommand(id, inst, cc, cmd)
       luup.variable_set (sid, "Mode", value, d)
     end
@@ -414,10 +410,7 @@ local S_HVAC_UserMode = {
     local valid = {Off = true, AutoChangeOver = true, CoolOn = true, HeatOn = true}
     local value = args.NewModeTarget
     local altid = luup.devices[d].id
-    local node = "^%d+"
-    local instance = "%d+$"
-    local id = altid: match (node)
-    local inst = altid: match (instance)
+    local id, inst = altid: match "^(%d+)%-(%d+)$"
     local cc = 64     --command class
     local sid = args.serviceId
     if valid[value] then
@@ -590,7 +583,6 @@ local command_class = {
   -- multilevel switch
   ["38"] = function (d, inst, meta)
     local level = tonumber (inst.metrics.level) or 0
---    setVar ("LoadLevelTarget", level, meta.service, d)    -- *********************
     setVar ("LoadLevelStatus", level, meta.service, d)
     local status = (level > 0 and "1") or "0"
     setVar ("Status", status, SID[S_SwitchPower], d)      -- *********************
@@ -733,12 +725,6 @@ function _G.updateChildren (d)
       local zDevNo = OFFSET + node * 10 + instance    -- determine device number from node and id
       local zDev = luup.devices[zDevNo]
       if zDev then
-        -- update device name, if changed
---        if altid == zDev.id
---        and inst.metrics.title ~= zDev.description then
---          log (table.concat {"renaming device, old --> new: ", zDev.description, " --> ", inst.metrics.title})
---          zDev: rename (inst.metrics.title)
---        end
         -- set all the Vdev variables in the Zwave node devices
         local id = vtype .. altid
         setVar (id, inst.metrics.level, SID.ZWay, zDevNo)
@@ -960,7 +946,9 @@ end
 
 -- index virtual devices number by node-instance number and build instance metadata
 -- also index all vDevs by altid
+-- also index locations (rooms) by node-instance
 local function index_nodes (d)
+local room_index = setmetatable ({}, {__index = function() return OFFSET end})   -- default to room '0'
   local index = {}
   for _,v in pairs (d) do
     local meta = vDev_meta (v) or {} -- construct metadata
@@ -972,9 +960,11 @@ local function index_nodes (d)
       local t = index[n_i] or {}   -- construct index
       t[#t+1] = v
       index[n_i] = t
+      local location = v.location or 0
+      if location ~= 0 then room_index[n_i] = location + OFFSET end
     end
   end
-  return index
+  return index, room_index
 end
 
 
@@ -1198,23 +1188,50 @@ local function createChildren (bridgeDevNo, vDevs, room, OFFSET)
     return id
   end
 
+   --[[
+
+           -- update device name and location, if required
+   --        if altid == zDev.id
+   --        and inst.metrics.title ~= zDev.description then
+   --          log (table.concat {"renaming device, old --> new: ", zDev.description, " --> ", inst.metrics.title})
+   --          zDev: rename (inst.metrics.title)
+   --        end
+
+   --]]
+
   local function checkDeviceExists (parent, id, name, altid, upnp_file, json_file, room)
     local dev = luup.devices[id]
     if not dev then
       something_changed = true
       dev = createZwaveDevice (parent, id, name, altid, upnp_file, json_file, room)
     end
-    if dev.room_num ~= room then dev: rename (nil, room) end -- ensure it's not in Room 101!!
+    if CLONEROOMS then dev: rename (nil, room) end          -- force to given room name
+    if dev.room_num == 101 then dev: rename (nil, room) end -- ensure it's not in Room 101!!
     list[#list+1] = id   -- add to new list
     current[id] = nil    -- mark as done
   end
+
+  -- create ZWay room names
+   local function clone_rooms(vDevs)
+     for _, v in pairs (vDevs) do
+       local loc = v.location or 0
+       if loc > 0 then
+         luup.rooms[loc+OFFSET] = v.locationName or ("ZWay Room " .. loc)  -- ensure room exists
+       end
+     end
+   end
+
 
   --------------
   --
   -- first the Zwave node devices...
   --
-  local zDevs = index_nodes (vDevs)   -- structure into Zwave node-instances with children
-  debug(json.encode(zDevs))
+  local zDevs, room_index = index_nodes (vDevs)  -- structure into Zwave node-instances with children
+  debug(json.encode(room_index))
+
+  if CLONEROOMS then clone_rooms (vDevs) end    -- make sure the rooms exist
+
+  --  debug(json.encode(zDevs))
   local updaters = {}
   for nodeInstance, ldv in pairs(zDevs) do
     local n,i = nodeInstance: match  "(%d+)%-(%d+)"
@@ -1409,6 +1426,12 @@ function init(devNo)
   local user     = uiVar ("Username", "admin")
 	local password = uiVar ("Password", "razberry")
 
+  CLONEROOMS  = uiVar ("CloneRooms", '')        -- if set to 'true' then clone rooms and place devices there
+     NAMEDEVICES = uiVar ("NameDevices", '')       -- if set to 'true' then copy device names from ZWay
+     local is_true = {["true"] = true, ["1"] = true}
+     CLONEROOMS  = is_true[CLONEROOMS]
+     NAMEDEVICES = is_true[NAMEDEVICES]
+
   local testfile = uiVar ("Test_JSON_File", '')
   if testfile ~= '' then
     Z = ZWayVDev_DUMMY_API (testfile)
@@ -1437,8 +1460,9 @@ function init(devNo)
     -- make sure room exists
     local Remote_ID = 31415926
     setVar ("Remote_ID", Remote_ID, SID.bridge)  -- 2020.02.12   use as unique remote ID
+    local room_number = OFFSET
     local room_name = "ZWay-" .. Remote_ID
-    local room_number = luup.rooms.create (room_name)   -- may already exist
+    luup.rooms[room_number] = luup.rooms[room_number] or room_name   -- may already exist with different name
 
     local vDevs = Z.devices ()
 
