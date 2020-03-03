@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 ABOUT = {
   NAME          = "L_ZWay2",
-  VERSION       = "2020.03.03",
+  VERSION       = "2020.03.03b",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2020 AKBooer",
@@ -214,30 +214,21 @@ vDev commands:
 
 local NIaltid = "^%d+%-%d+$"      -- altid of just node-instance format (ie. not child vDev)
 
+
 local S_SwitchPower = {
 
     ---------------
-    -- 2020.03.02   thanks to @rafale77 for extensive testing and code changes
+    -- 2020.03.02  thanks to @rafale77 for extensive testing and code changes
     --
     SetTarget = function (d, args)
       local level = args.newTargetValue or '0'
       luup.variable_set (SID.switch, "Target", (level == '0') and '0' or '1', d)
-      local altid = luup.devices[d].id
+      local dev = luup.devices[d]
+      local dimmer = dev.services[SID.dimmer]   -- check for dimmer service on device (instance)
+      local class = dimmer and "-38" or "-37"
+      local altid = dev.id
+      altid = altid: match (NIaltid) and altid..class or altid
       local value = on_or_off (level)
-      local checkdimm = luup.variable_get(SID.dimmer, "LoadLevelTarget", d)
-      if checkdimm then
-        local dim = 0
-        if value == "off" then
-          local lastdim= luup.variable_get(SID.dimmer, "LoadLevelTarget",d)
-          luup.variable_set(SID.dimmer, "LoadLevelLast", lastdim, d)
-        else
-          dim = luup.variable_get(SID.dimmer, "LoadLevelLast",d)
-        end
-        luup.variable_set(SID.dimmer, "LoadLevelTarget", dim, d)
-        altid = altid: match (NIaltid) and altid.."-38" or altid
-      else
-        altid = altid: match (NIaltid) and altid.."-37" or altid
-      end
       Z.command (altid, value)
     end,
 
@@ -258,7 +249,7 @@ local S_Dimming = {
       local value = "exact?level=" .. level
       Z.command (altid, value)
     end,
-
+  
   }
 
 
