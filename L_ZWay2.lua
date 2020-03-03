@@ -589,6 +589,7 @@ local command_class = {
     setVar ("LoadLevelStatus", level, meta.service, d)
     local status = (level > 0 and "1") or "0"
     setVar ("Status", status, SID[S_SwitchPower], d)
+  end,
 
   -- binary sensor
   ["48"] = function (d, inst)
