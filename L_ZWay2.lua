@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 ABOUT = {
   NAME          = "L_ZWay2",
-  VERSION       = "2020.03.03b",
+  VERSION       = "2020.03.04",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2020 AKBooer",
@@ -158,6 +158,12 @@ local function open_or_close (x)
   local y = {["open"] = "0", ["close"] = "1", ["0"] = "open", ["1"] = "close"}
   return y[x] or x
 end
+
+-- make either "1" or "true" work the same way
+local function logical_true (flag)
+  return flag == "1" or flag == "true"
+end
+
 
 
 ----------------------------------------------------
@@ -933,34 +939,6 @@ local function vDev_meta (v)
   end
 end
 
---------------------------------------------------
---
--- BUILD LUUP DEVICE STRUCTURE
---
-
--- index virtual devices number by node-instance number and build instance metadata
--- also index all vDevs by altid
--- also index locations (rooms) by node-instance
-local function index_nodes (d)
-  local index = {}
-  local room_index = setmetatable ({}, {__index = function() return OFFSET end})   -- default to room '0'
-  for _,v in pairs (d) do
-    local meta = vDev_meta (v) or {} -- construct metadata
-    local node = meta.node
-    local instance = meta.instance
-    if node and node ~= "0" then    -- 2017.10.04  ignore device "0" (appeared in new firmware update)
-      v.meta = meta
-      local n_i = table.concat {node, '-', instance}
-      local t = index[n_i] or {}   -- construct index
-      t[#t+1] = v
-      index[n_i] = t
-      local location = v.location or 0
-      if location ~= 0 then room_index[n_i] = location + OFFSET end
-    end
-  end
-  return index, room_index
-end
-
 
 ----------------------------
 ---
@@ -1158,6 +1136,33 @@ local function configureDevice (id, name, ldv, updaters, child)
 end
 
 
+-- index virtual devices number by node-instance number and build instance metadata
+-- also index all vDevs by altid
+-- also index locations (rooms) by node-instance
+local function index_nodes (d, room0)
+  local index = {}
+  local room_index = setmetatable ({}, {__index = function() return room0 end})   -- default to room '0'
+  for _,v in pairs (d) do
+    local meta = vDev_meta (v) or {} -- construct metadata
+    local node = meta.node
+    local instance = meta.instance
+    if node and node ~= "0" then    -- 2017.10.04  ignore device "0" (appeared in new firmware update)
+      v.meta = meta
+      local n_i = table.concat {node, '-', instance}
+      local t = index[n_i] or {}   -- construct index
+      t[#t+1] = v
+      index[n_i] = t
+      local location = v.location or 0
+      if CLONEROOMS and location ~= 0 then 
+        room_index[n_i] =  
+          luup.rooms.create (v.locationName or ("ZWay Room " .. location))  -- may already exist
+      end
+    end
+  end  
+  return index, room_index
+end
+
+
 -- create the child devices managed by the bridge
 local function createChildren (bridgeDevNo, vDevs, room, OFFSET)
   local N = 0
@@ -1205,24 +1210,12 @@ local function createChildren (bridgeDevNo, vDevs, room, OFFSET)
     current[id] = nil    -- mark as done
   end
 
-  -- create ZWay room names
-  local function clone_rooms(vDevs)
-    for _, v in pairs (vDevs) do
-      local loc = v.location or 0
-      if loc > 0 then
-        luup.rooms[loc+OFFSET] = v.locationName or ("ZWay Room " .. loc)  -- ensure room exists
-      end
-    end
-  end
-
   --------------
   --
   -- first the Zwave node devices...
   --
-  local zDevs, room_index = index_nodes (vDevs)  -- structure into Zwave node-instances with children
+  local zDevs, room_index = index_nodes (vDevs, room)  -- structure into Zwave node-instances with children
   debug(json.encode(room_index))
-
-  if CLONEROOMS then clone_rooms (vDevs) end    -- make sure the rooms exist
 
   --  debug(json.encode(zDevs))
   local updaters = {}
@@ -1245,6 +1238,7 @@ local function createChildren (bridgeDevNo, vDevs, room, OFFSET)
     local upnp_file, json_file
 
     upnp_file, name = configureDevice (id, name, ldv, updaters, child)  -- note extra child param
+    room = CLONEROOMS and room_index[nodeInstance] or room
     checkDeviceExists (parent, id, name, altid, upnp_file, json_file, room)
 
     -- now any specified child devices...
@@ -1453,9 +1447,9 @@ function init(devNo)
     -- make sure room exists
     local Remote_ID = 31415926
     setVar ("Remote_ID", Remote_ID, SID.bridge)  -- 2020.02.12   use as unique remote ID
-    local room_number = OFFSET
+    
     local room_name = "ZWay-" .. Remote_ID
-    luup.rooms[room_number] = luup.rooms[room_number] or room_name   -- may already exist with different name
+    local room_number = luup.rooms.create (room_name)   -- may lready exist
 
     local vDevs = Z.devices ()
 
