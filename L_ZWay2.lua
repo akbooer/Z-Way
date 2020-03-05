@@ -1251,8 +1251,6 @@ local function createChildren (bridgeDevNo, vDevs, room, OFFSET)
   local zDevs, room_index = index_nodes (vDevs, room)  -- structure into Zwave node-instances with children
   debug(json.encode(room_index))
 
-  if CLONEROOMS then clone_rooms (vDevs) end    -- make sure the rooms exist
-
   --  debug(json.encode(zDevs))
   local updaters = {}
   for nodeInstance, ldv in pairs(zDevs) do
