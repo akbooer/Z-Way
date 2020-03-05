@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 ABOUT = {
   NAME          = "L_ZWay2",
-  VERSION       = "2020.03.04b",
+  VERSION       = "2020.03.05",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2020 AKBooer",
@@ -362,7 +362,6 @@ local S_SceneControllerLED = {
       local altid = luup.devices[d].id
       local id, inst = altid: match "^(%d+)%-(%d+)$"
       local cc = 145     --command class
-      local sid = args.serviceId
       local color = tonumber(args.newValue)
       local bit=require("bit")
       local indicator = args.Indicator
@@ -638,7 +637,7 @@ local command_class = {
   ["49"] = function (d, inst, meta)   -- TODO: more to do here to sub-type?
     local sensor_variable_name = {
       [SID[S_Temperature]]    = "CurrentTemperature",
-      [SID[S_EnergyMetering]] = "Watts",
+      [SID[S_EnergyMetering]] = "W",
     }
     local var = sensor_variable_name[meta.service] or "CurrentLevel"
     local value = inst.metrics.level
@@ -1406,7 +1405,7 @@ local function ZWayVDev_API (ip, user, password)
   end
 
   local function zwsend (id, data)
-    local url = "http://%s:8083/ZWaveAPI/SendData(%s,%s)"
+    local url = "http://%s:8083/ZWaveAPI/Run/SendData(%s,%s)"
     local request = url: format (ip, id, data)
     return HTTP_request_json (request)
   end
