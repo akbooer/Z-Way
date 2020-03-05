@@ -38,7 +38,7 @@ ABOUT = {
 -- 2020.02.25  add intermediate instance nodes
 -- 2020.02.26  change node numbering scheme
 -- 2020.03.02  significant improvements to dimmer handling thanks to @rafale77
--- 2020.03.04b added support for Leviton 4 button scene controller LEDs
+
 
 -----------------
 
@@ -367,7 +367,7 @@ local S_SceneControllerLED = {
       local bit=require("bit")
       local indicator = args.Indicator
       local data = "[%s,0,29,13,1,255,%s,0,0,10]"
-      local ItoL = {1 = 1, 2 = 2, 3 = 4, 4 = 8, 5 = 15}
+      local ItoL = {["1"] = 1, ["2"] = 2, ["3"] = 4, ["4"] = 8, ["5"] = 15}
       local led = ItoL[indicator]
       if led then
         if color == 2 then led = bit.lshift(led,4)
@@ -789,6 +789,7 @@ local vMap = {
 
   ["37"] = { "D_BinaryLight1.xml",      S_SwitchPower       },
   ["38"] = { "D_DimmableLight1.xml",    S_Dimming },
+  ["45"] = { "D_SceneControllerLED1.xml", S_SceneControllerLED, "D_SceneControllerLED1.json"}, -- Leviton Zone/scene controller
   ["48"] = { "D_MotionSensor1.xml",     S_Security ,        -- SensorBinary
     scale = {
 --  1	"General purpose"
@@ -904,7 +905,7 @@ SensorMultilevel
   ["102"] = { "D_BinaryLight1.xml",  S_SwitchPower, "D_GarageDoor1.json" },    -- "Barrier Operator"
   ["113"] = { "D_DoorSensor1.xml", S_Security },    -- Switch
   ["128"] = { nil, S_EnergyMetering },
-  ["145"] = { "D_SceneControllerLED1.xml", S_SceneControllerLED, "D_SceneControllerLED1.json"} -- Leviton Zone/scene controller
+  ["145"] = { "D_SceneControllerLED1.xml", S_SceneControllerLED, "D_SceneControllerLED1.json"}, -- Leviton Zone/scene controller
   ["152"] = { "D_MotionSensor1.xml", S_Security },
   ["156"] = { "D_MotionSensor1.xml", S_Security },    -- Tamper switch?
 
