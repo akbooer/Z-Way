@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 ABOUT = {
   NAME          = "L_ZWay2",
-  VERSION       = "2020.03.04",
+  VERSION       = "2020.03.05",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2020 AKBooer",
@@ -604,7 +604,7 @@ local command_class = {
   ["49"] = function (d, inst, meta)   -- TODO: more to do here to sub-type?
     local sensor_variable_name = {
       [SID[S_Temperature]]    = "CurrentTemperature",
-      [SID[S_EnergyMetering]] = "Watts",
+      [SID[S_EnergyMetering]] = "W",    --  2020.03.05  "Watts" conflicts with meter "50-2" if both present
     }
     local var = sensor_variable_name[meta.service] or "CurrentLevel"
     local value = inst.metrics.level
