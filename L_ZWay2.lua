@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 ABOUT = {
   NAME          = "L_ZWay2",
-  VERSION       = "2020.03.05",
+  VERSION       = "2020.03.05b",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2020 AKBooer",
@@ -160,10 +160,9 @@ local function open_or_close (x)
 end
 
 -- make either "1" or "true" work the same way
-local function logical_true (flag)
-  return flag == "1" or flag == "true"
-end
-
+ local function logical_true (flag)
+   return flag == "1" or flag == "true"
+ end
 
 
 ----------------------------------------------------
@@ -220,21 +219,30 @@ vDev commands:
 
 local NIaltid = "^%d+%-%d+$"      -- altid of just node-instance format (ie. not child vDev)
 
-
 local S_SwitchPower = {
 
     ---------------
-    -- 2020.03.02  thanks to @rafale77 for extensive testing and code changes
+    -- 2020.03.02   thanks to @rafale77 for extensive testing and code changes
     --
     SetTarget = function (d, args)
       local level = args.newTargetValue or '0'
       luup.variable_set (SID.switch, "Target", (level == '0') and '0' or '1', d)
-      local dev = luup.devices[d]
-      local dimmer = dev.services[SID.dimmer]   -- check for dimmer service on device (instance)
-      local class = dimmer and "-38" or "-37"
-      local altid = dev.id
-      altid = altid: match (NIaltid) and altid..class or altid
+      local altid = luup.devices[d].id
       local value = on_or_off (level)
+      local checkdimm = luup.variable_get(SID.dimmer, "LoadLevelTarget", d)
+      if checkdimm then
+        local dim = 0
+        if value == "off" then
+          local lastdim= luup.variable_get(SID.dimmer, "LoadLevelTarget",d)
+          luup.variable_set(SID.dimmer, "LoadLevelLast", lastdim, d)
+        else
+          dim = luup.variable_get(SID.dimmer, "LoadLevelLast",d)
+        end
+        luup.variable_set(SID.dimmer, "LoadLevelTarget", dim, d)
+        altid = altid: match (NIaltid) and altid.."-38" or altid
+      else
+        altid = altid: match (NIaltid) and altid.."-37" or altid
+      end
       Z.command (altid, value)
     end,
 
@@ -255,7 +263,7 @@ local S_Dimming = {
       local value = "exact?level=" .. level
       Z.command (altid, value)
     end,
-  
+
   }
 
 
@@ -348,6 +356,31 @@ local S_Generic         = { }
 local S_Humidity        = { }
 local S_Light           = { }
 local S_SceneController = { }
+local S_SceneControllerLED = {
+
+    SetLight = function (d, args)
+      local altid = luup.devices[d].id
+      local id, inst = altid: match "^(%d+)%-(%d+)$"
+      local cc = 145     --command class
+      local color = tonumber(args.newValue)
+      local bit=require("bit")
+      local indicator = args.Indicator
+      local data = "[%s,0,29,13,1,255,%s,0,0,10]"
+      local ItoL = {["1"] = 1, ["2"] = 2, ["3"] = 4, ["4"] = 8, ["5"] = 15}
+      local led = ItoL[indicator]
+      if led then
+        if color == 2 then led = bit.lshift(led,4)
+        elseif color == 3 then led = led + bit.lshift(led,4)
+        elseif color == 0 then led = 0
+        end
+        data = data: format(cc,led)
+        Z.zwsend(id,data)
+      end
+    end,
+
+ }
+SID[S_SceneControllerLED] = "urn:micasaverde-com:serviceId:SceneControllerLED1"
+
 local S_Unknown         = { }   -- "catch-all" service
 
 
@@ -604,7 +637,7 @@ local command_class = {
   ["49"] = function (d, inst, meta)   -- TODO: more to do here to sub-type?
     local sensor_variable_name = {
       [SID[S_Temperature]]    = "CurrentTemperature",
-      [SID[S_EnergyMetering]] = "W",    --  2020.03.05  "Watts" conflicts with meter "50-2" if both present
+      [SID[S_EnergyMetering]] = "W",
     }
     local var = sensor_variable_name[meta.service] or "CurrentLevel"
     local value = inst.metrics.level
@@ -755,6 +788,7 @@ local vMap = {
 
   ["37"] = { "D_BinaryLight1.xml",      S_SwitchPower       },
   ["38"] = { "D_DimmableLight1.xml",    S_Dimming },
+  ["45"] = { "D_SceneControllerLED1.xml", S_SceneControllerLED, "D_SceneControllerLED1.json"}, -- Leviton Zone/scene controller
   ["48"] = { "D_MotionSensor1.xml",     S_Security ,        -- SensorBinary
     scale = {
 --  1	"General purpose"
@@ -870,6 +904,7 @@ SensorMultilevel
   ["102"] = { "D_BinaryLight1.xml",  S_SwitchPower, "D_GarageDoor1.json" },    -- "Barrier Operator"
   ["113"] = { "D_DoorSensor1.xml", S_Security },    -- Switch
   ["128"] = { nil, S_EnergyMetering },
+  ["145"] = { "D_SceneControllerLED1.xml", S_SceneControllerLED, "D_SceneControllerLED1.json"}, -- Leviton Zone/scene controller
   ["152"] = { "D_MotionSensor1.xml", S_Security },
   ["156"] = { "D_MotionSensor1.xml", S_Security },    -- Tamper switch?
 
@@ -1135,7 +1170,6 @@ local function configureDevice (id, name, ldv, updaters, child)
   return upnp_file, name
 end
 
-
 -- index virtual devices number by node-instance number and build instance metadata
 -- also index all vDevs by altid
 -- also index locations (rooms) by node-instance
@@ -1153,12 +1187,12 @@ local function index_nodes (d, room0)
       t[#t+1] = v
       index[n_i] = t
       local location = v.location or 0
-      if CLONEROOMS and location ~= 0 then 
-        room_index[n_i] =  
-          luup.rooms.create (v.locationName or ("ZWay Room " .. location))  -- may already exist
+      if CLONEROOMS and location ~= 0 then
+        room_index[n_i] =
+        luup.rooms.create (v.locationName or ("ZWay Room " .. location))  -- may already exist
       end
     end
-  end  
+  end
   return index, room_index
 end
 
@@ -1216,6 +1250,8 @@ local function createChildren (bridgeDevNo, vDevs, room, OFFSET)
   --
   local zDevs, room_index = index_nodes (vDevs, room)  -- structure into Zwave node-instances with children
   debug(json.encode(room_index))
+
+  if CLONEROOMS then clone_rooms (vDevs) end    -- make sure the rooms exist
 
   --  debug(json.encode(zDevs))
   local updaters = {}
@@ -1368,6 +1404,12 @@ local function ZWayVDev_API (ip, user, password)
     return HTTP_request_json (request)
   end
 
+  local function zwsend (id, data)
+    local url = "http://%s:8083/ZWaveAPI/Run/SendData(%s,%s)"
+    local request = url: format (ip, id, data)
+    return HTTP_request_json (request)
+  end
+
   -- send a generic request
   local function request (req)
     local url = "http://%s:8083%s"
@@ -1381,6 +1423,7 @@ local function ZWayVDev_API (ip, user, password)
       request = request,    -- for low-level access
       command = command,
       zwcommand = zwcommand,
+      zwsend = zwsend,
       devices = devices,
     }
   end
@@ -1447,9 +1490,8 @@ function init(devNo)
     -- make sure room exists
     local Remote_ID = 31415926
     setVar ("Remote_ID", Remote_ID, SID.bridge)  -- 2020.02.12   use as unique remote ID
-    
     local room_name = "ZWay-" .. Remote_ID
-    local room_number = luup.rooms.create (room_name)   -- may lready exist
+    local room_number = luup.rooms.create (room_name)   -- may already exist
 
     local vDevs = Z.devices ()
 
