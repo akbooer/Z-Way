@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 ABOUT = {
   NAME          = "L_ZWay2",
-  VERSION       = "2020.03.04",
+  VERSION       = "2020.03.04b",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2020 AKBooer",
@@ -38,7 +38,7 @@ ABOUT = {
 -- 2020.02.25  add intermediate instance nodes
 -- 2020.02.26  change node numbering scheme
 -- 2020.03.02  significant improvements to dimmer handling thanks to @rafale77
-
+-- 2020.03.04b added support for Leviton 4 button scene controller LEDs
 
 -----------------
 
@@ -356,6 +356,32 @@ local S_Generic         = { }
 local S_Humidity        = { }
 local S_Light           = { }
 local S_SceneController = { }
+local S_SceneControllerLED = {
+
+    SetLight = function (d, args)
+      local altid = luup.devices[d].id
+      local id, inst = altid: match "^(%d+)%-(%d+)$"
+      local cc = 145     --command class
+      local sid = args.serviceId
+      local color = tonumber(args.newValue)
+      local bit=require("bit")
+      local indicator = args.Indicator
+      local data = "[%s,0,29,13,1,255,%s,0,0,10]"
+      local ItoL = {1 = 1, 2 = 2, 3 = 4, 4 = 8, 5 = 15}
+      local led = ItoL[indicator]
+      if led then
+        if color == 2 then led = bit.lshift(led,4)
+        elseif color == 3 then led = led + bit.lshift(led,4)
+        elseif color == 0 then led = 0
+        end
+        data = data: format(cc,led)
+        Z.zwsend(id,data)
+      end
+    end,
+
+ }
+SID[S_SceneControllerLED] = "urn:micasaverde-com:serviceId:SceneControllerLED1"
+
 local S_Unknown         = { }   -- "catch-all" service
 
 
@@ -878,6 +904,7 @@ SensorMultilevel
   ["102"] = { "D_BinaryLight1.xml",  S_SwitchPower, "D_GarageDoor1.json" },    -- "Barrier Operator"
   ["113"] = { "D_DoorSensor1.xml", S_Security },    -- Switch
   ["128"] = { nil, S_EnergyMetering },
+  ["145"] = { "D_SceneControllerLED1.xml", S_SceneControllerLED, "D_SceneControllerLED1.json"} -- Leviton Zone/scene controller
   ["152"] = { "D_MotionSensor1.xml", S_Security },
   ["156"] = { "D_MotionSensor1.xml", S_Security },    -- Tamper switch?
 
@@ -1377,6 +1404,12 @@ local function ZWayVDev_API (ip, user, password)
     return HTTP_request_json (request)
   end
 
+  local function zwsend (id, data)
+    local url = "http://%s:8083/ZWaveAPI/SendData(%s,%s)"
+    local request = url: format (ip, id, data)
+    return HTTP_request_json (request)
+  end
+
   -- send a generic request
   local function request (req)
     local url = "http://%s:8083%s"
@@ -1390,6 +1423,7 @@ local function ZWayVDev_API (ip, user, password)
       request = request,    -- for low-level access
       command = command,
       zwcommand = zwcommand,
+      zwsend = zwsend,
       devices = devices,
     }
   end
