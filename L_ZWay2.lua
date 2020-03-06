@@ -550,7 +550,7 @@ SID [S_Light]           = "urn:micasaverde-com:serviceId:LightSensor1"
 SID [S_Security]        = "urn:micasaverde-com:serviceId:SecuritySensor1"
 SID [S_SwitchPower]     = "urn:upnp-org:serviceId:SwitchPower1"
 SID [S_Temperature]     = "urn:upnp-org:serviceId:TemperatureSensor1"
-
+SID [S_WindowCovering]  = "urn:micasaverde-com:serviceId:WindowCovering1"
 
 for schema, sid in pairs (SID) do -- reverse look-up  sid ==> schema
   if type(schema) == "table" then service_schema[sid] = schema end
