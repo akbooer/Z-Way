@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 ABOUT = {
   NAME          = "L_ZWay2",
-  VERSION       = "2020.03.05",
+  VERSION       = "2020.03.07",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2020 AKBooer",
@@ -60,8 +60,9 @@ local devNo     -- out device number
 local OFFSET    -- bridge offset for child devices
 local POLLRATE  -- poll rate for Zway devices
 
-local CLONEROOMS  --
-local NAMEDEVICES --
+local CLONEROOMS    --
+local NAMEDEVICES   --
+local ZERODIMMER    -- 
 
 local service_schema = {}    -- serviceId ==> schema implementation
 
@@ -160,8 +161,9 @@ local function open_or_close (x)
 end
 
 -- make either "1" or "true" work the same way
-local function logical_true (flag)
-  return flag == "1" or flag == "true"
+local function is_true (flag)
+  local logical_true = {["true"] = true, ["1"] = true}
+  return logical_true [flag]
 end
 
 
@@ -227,12 +229,20 @@ local S_SwitchPower = {
     -- 2020.03.02  thanks to @rafale77 for extensive testing and code changes
     --
     SetTarget = function (d, args)
-      local level = args.newTargetValue or '0'
-      luup.variable_set (SID.switch, "Target", (level == '0') and '0' or '1', d)
-      local dev = luup.devices[d]
-      local dimmer = dev.services[SID.dimmer]   -- check for dimmer service on device (instance)
-      local class = dimmer and "-38" or "-37"
-      local altid = dev.id
+      local level = tostring(args.newTargetValue or 0)
+      local off = level == '0'
+      local class ="-37"
+      
+      luup.variable_set (SID.switch, "Target", off and '0' or '1', d)
+      local dimmer = luup.variable_get(SID.dimmer, "OnEffectLevel",d)  -- check for dimmer
+      if dimmer then
+        class =  "-38"
+        if ZERODIMMER then
+          luup.variable_set (SID.dimmer, "LoadLevelTarget", off and '0' or dimmer, d)
+        end
+      end
+      
+      local altid = luup.devices[d].id
       altid = altid: match (NIaltid) and altid..class or altid
       local value = on_or_off (level)
       Z.command (altid, value)
@@ -247,11 +257,16 @@ local S_Dimming = {
     -- 2020.03.02   thanks to @rafale77 for extensive testing and code changes
     --
     SetLoadLevelTarget = function (d, args)
-      local level = args.newLoadlevelTarget or '0'
-      luup.variable_set (SID.switch, "Target", (level == '0') and '0' or '1', d)
+      local level = tostring (args.newLoadlevelTarget or 0)
+      local off = level == '0'
+      local class = "-38"
+      
+      luup.variable_set (SID.switch, "Target", off and '0' or '1', d)
+      luup.variable_set (SID.dimmer, "OnEffectLevel", level, d)
       luup.variable_set (SID.dimmer, "LoadLevelTarget", level, d)
+      
       local altid = luup.devices[d].id
-      altid = altid: match (NIaltid) and altid.."-38" or altid
+      altid = altid: match (NIaltid) and altid..class or altid
       local value = "exact?level=" .. level
       Z.command (altid, value)
     end,
@@ -719,6 +734,12 @@ local D = {}    -- device structure simply for the HTTP callback diagnostic
 
 function _G.updateChildren (d)
   D = d or Z.devices () or {}
+--    else
+--    luup.set_failure (2, devNo)	        -- authorisation failure
+--    setVar ("DisplayLine1", 'Login required', SID.AltUI)
+--    status, comment = false, "Failed to authenticate"
+--  end
+
   for _,inst in pairs (D) do
     local altid, vtype, node, instance = NICS_etc (inst)
     if node then
@@ -922,6 +943,9 @@ local function vDev_meta (v)
     local devtype = (json_file or upnp_file or ''): match "^D_(%u+%l*)"
 
     return {
+      name      = v.metrics.title,
+      level     = v.metrics.level,
+      
       upnp_file = upnp_file,
       service   = service,
       json_file = json_file,
@@ -1304,10 +1328,10 @@ end
 --
 
 
-local function ZWayVDev_API (ip, user, password)
+local function ZWayVDev_API (ip, sid)
 
-  local cookie
-
+  local cookie = "ZWAYSession=" .. (sid or '')
+  
   local function HTTP_request (url, body)
     local response_body = {}
     local method = body and "POST" or "GET"
@@ -1335,14 +1359,18 @@ local function ZWayVDev_API (ip, user, password)
     return status, json.decode (json_response)
   end
 
-  local function authenticate ()
+  local function authenticate (user, password)
+    cookie = nil      -- not valud any more
     local url = "http://%s:8083/ZAutomation/api/v1/login"
     local data = json.encode {login=user, password = password}
     local _, j = HTTP_request_json (url: format (ip), data)
 
     if j then
       local sid = j and j.data and j.data.sid
-      if sid then cookie = "ZWAYSession=" .. sid end
+      if sid then 
+        cookie = "ZWAYSession=" .. sid 
+        setVar ("ZWAYSession", sid)
+      end
     end
     return j
   end
@@ -1350,7 +1378,7 @@ local function ZWayVDev_API (ip, user, password)
   local function devices ()
     local url = "http://%s:8083/ZAutomation/api/v1/devices"
     local _, d = HTTP_request_json (url: format (ip))
-    return d and d.data and d.data.devices
+    return d and d.data and d.data.devices or {}
   end
 
   -- send a command
@@ -1375,14 +1403,31 @@ local function ZWayVDev_API (ip, user, password)
     return HTTP_request (request)
   end
 
+  local function status ()
+  local url = "http://%s:8083/ZAutomation/api/v1/status"
+  local _, d = HTTP_request_json (url: format (ip))
+  return d
+  end
+  
   -- ZWayVDev()
-  if authenticate () then
-    return {
-      request = request,    -- for low-level access
-      command = command,
-      zwcommand = zwcommand,
-      devices = devices,
-    }
+  return {
+    request = request,    -- for low-level access
+    status  = status,
+    command = command,
+    zwcommand = zwcommand,
+    devices = devices,
+    authenticate = authenticate}
+
+end
+
+
+-- ACTION Login
+function _G.Login (p)
+  debug (json.encode(p))
+  local j = Z.authenticate (p.Username, p.Password)
+  if j then 
+    setVar ("DisplayLine1", "Restart required", SID.AltUI)
+    luup.set_failure (0, devNo)
   end
 end
 
@@ -1409,22 +1454,30 @@ function init(devNo)
 
 	POLLRATE = uiVar ("Pollrate", 2)
   POLLRATE = math.min (tonumber(POLLRATE) or 0, 0.5)
+  
+--  local user     = uiVar ("Username", "admin")
+--	local password = uiVar ("Password", "razberry")
 
-  local user     = uiVar ("Username", "admin")
-	local password = uiVar ("Password", "razberry")
-
-  CLONEROOMS  = uiVar ("CloneRooms", '')        -- if set to 'true' then clone rooms and place devices there
-     NAMEDEVICES = uiVar ("NameDevices", '')       -- if set to 'true' then copy device names from ZWay
-     local is_true = {["true"] = true, ["1"] = true}
-     CLONEROOMS  = is_true[CLONEROOMS]
-     NAMEDEVICES = is_true[NAMEDEVICES]
+  CLONEROOMS  = uiVar ("CloneRooms", '')              -- if true, clone rooms and place devices there
+  NAMEDEVICES = uiVar ("NameDevices", '')             -- if true, copy device names from ZWay
+  ZERODIMMER  = uiVar ("ZeroDimmerWhenOff", "true")   -- if true, zero dimmer sliders when off
+  
+  CLONEROOMS  = is_true (CLONEROOMS)
+  NAMEDEVICES = is_true (NAMEDEVICES)
+  ZERODIMMER  = is_true (ZERODIMMER)
 
   local testfile = uiVar ("Test_JSON_File", '')
-  if testfile ~= '' then
-    Z = ZWayVDev_DUMMY_API (testfile)
-  else
-    Z = ZWayVDev_API (ip, user, password)
-  end
+  
+  -- Authenticate
+  do
+    if testfile ~= '' then
+      Z = ZWayVDev_DUMMY_API (testfile)
+    else
+      local session = getVar "ZWAYSession"
+      Z = ZWayVDev_API (ip, session)
+    end  
+  end  
+  --
 
   setVar ("DisplayLine1", '', SID.AltUI)
   setVar ("DisplayLine2", ip, SID.AltUI)
@@ -1433,36 +1486,32 @@ function init(devNo)
   setVar ("Offset", OFFSET)
 
   local status, comment
-  if Z then
-    luup.set_failure (0, devNo)	        -- openLuup is UI7 compatible
-    status, comment = true, "OK"
+  
+  luup.set_failure (0, devNo)	        -- openLuup is UI7 compatible
+  status, comment = true, "OK"
 
-    HTTP_request = function (url) return Z.request (url) end        -- global low-level access
+  HTTP_request = function (url) return Z.request (url) end        -- global low-level access
 
-    -- device-specific ID for HTTP handler allows multiple plugin instances
-    local handler = "HTTP_Z-Way_" .. devNo
-    _G[handler] = function () return json.encode (D), "application/json" end
-    luup.register_handler (handler, 'z' .. devNo)
+  -- device-specific ID for HTTP handler allows multiple plugin instances
+  local handler = "HTTP_Z-Way_" .. devNo
+  _G[handler] = function () return json.encode (D), "application/json" end
+  luup.register_handler (handler, 'z' .. devNo)
 
-    -- make sure room exists
-    local Remote_ID = 31415926
-    setVar ("Remote_ID", Remote_ID, SID.bridge)  -- 2020.02.12   use as unique remote ID
-    
-    local room_name = "ZWay-" .. Remote_ID
-    local room_number = luup.rooms.create (room_name)   -- may lready exist
+  -- make sure room exists
+  local Remote_ID = 31415926
+  setVar ("Remote_ID", Remote_ID, SID.bridge)  -- 2020.02.12   use as unique remote ID
+  
+  local room_name = "ZWay-" .. Remote_ID
+  local room_number = luup.rooms.create (room_name)   -- may already exist
 
+  local ok = Z.status()  
+  if ok and ok.data == "OK" then 
     local vDevs = Z.devices ()
-
-    -- device-specific ID for HTTP handler allows multiple plugin instances
-    handler = "HTTP_Z-Way_TEST_" .. devNo
-    _G[handler] = function () return json.encode (vDevs), "application/json" end
-    luup.register_handler (handler, 'test' .. devNo)
-
     cclass_update = createChildren (devNo, vDevs, room_number, OFFSET)
     _G.updateChildren (vDevs)
-
   else
     luup.set_failure (2, devNo)	        -- authorisation failure
+    setVar ("DisplayLine1", 'Login required', SID.AltUI)
     status, comment = false, "Failed to authenticate"
   end
 
