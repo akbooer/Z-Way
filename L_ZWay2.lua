@@ -1177,7 +1177,7 @@ local function configureDevice (id, name, ldv, updaters, child)
       child[v.meta.altid] = true                            -- force child creation
     end
     for _, v in ipairs (classes["113"] or {}) do    -- add motion sensors
-      if v.meta.sub_class ~= "3" then         -- not a tamper switch
+      if v.meta.scale == 7 and v.meta.sub_class ~= "3" then         -- not a tamper switch
         v.meta.upnp_file = DEV.motion
         types["Alarm"] = (types["Alarm"] or 0) + 1
         child[v.meta.altid] = true                            -- force child creation
@@ -1191,7 +1191,7 @@ local function configureDevice (id, name, ldv, updaters, child)
 
   elseif classes["113"] and #classes["113"] > 1 then   -- sensor with tamper
     local v = classes["113"][1]
-    if v.meta.scale and v.meta.sub_class ~= "3" then         -- ignore tamper switch
+    if v.meta.scale == 7 and v.meta.sub_class ~= "3" then         -- ignore tamper switch
       upnp_file, name = add_updater(v)
     end
   end
