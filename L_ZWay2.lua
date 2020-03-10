@@ -1156,10 +1156,10 @@ local function configureDevice (id, name, ldv, updaters, child)
     local v = classes["98"][1]
     upnp_file, name = add_updater(v)
 
-  elseif classes["113"] and #classes["113"] == classes.n then   -- barrier
-    local v = classes["113"][1]    -- TODO: how to cope with multple motions??
-    upnp_file, name = add_updater (v)
-    upnp_file = DEV.motion      -- override default (door) sensor
+--  elseif classes["113"] and #classes["113"] == classes.n then   -- barrier
+--    local v = classes["113"][1]    -- TODO: how to cope with multple motions??
+--    upnp_file, name = add_updater (v)
+--    upnp_file = DEV.motion      -- override default (door) sensor
 
 --  elseif classes["49"] and #classes["49"] > 1 then      -- a multi-sensor combo
   elseif classes["49"]  then                              -- a multi-sensor combo
@@ -1191,7 +1191,7 @@ local function configureDevice (id, name, ldv, updaters, child)
 
   elseif classes["113"] and #classes["113"] > 1 then   -- sensor with tamper
     local v = classes["113"][1]
-    if v.meta.scale == 7 and v.meta.sub_class ~= "3" then         -- ignore tamper switch
+    if v.meta.sub_class ~= "3" then         -- ignore tamper switch
       upnp_file, name = add_updater(v)
     end
   end
