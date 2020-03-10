@@ -222,33 +222,29 @@ vDev commands:
 
 local NIaltid = "^%d+%-%d+$"      -- altid of just node-instance format (ie. not child vDev)
 
+
 local S_SwitchPower = {
 
     ---------------
-    -- 2020.03.02   thanks to @rafale77 for extensive testing and code changes
+    -- 2020.03.02  thanks to @rafale77 for extensive testing and code changes
     --
     SetTarget = function (d, args)
       local level = tostring(args.newTargetValue or 0)
       local off = level == '0'
       local class ="-37"
-
+      
       luup.variable_set (SID.switch, "Target", off and '0' or '1', d)
-      local dimmer = luup.variable_get(SID.dimmer, "LoadLevelTarget",d)  -- check for dimmer
+      local dimmer = luup.variable_get(SID.dimmer, "OnEffectLevel",d)  -- check for dimmer
       if dimmer then
-        class = "-38"
+        class =  "-38"
         if ZERODIMMER then
           luup.variable_set (SID.dimmer, "LoadLevelTarget", off and '0' or dimmer, d)
         end
-        if off then
-          luup.variable_set(SID.dimmer, "LoadLevelLast", dimmer, d)
-        else
-          local lastdim = luup.variable_get(SID.dimmer, "LoadLevelLast",d)
-        end
-        luup.variable_set (SID.dimmer, "LoadLevelTarget", off and '0' or lastdim, d)
       end
+      
       local altid = luup.devices[d].id
       altid = altid: match (NIaltid) and altid..class or altid
-      local value = on_or_off (args.newTargetValue)
+      local value = on_or_off (level)
       Z.command (altid, value)
     end,
 
@@ -264,17 +260,17 @@ local S_Dimming = {
       local level = tostring (args.newLoadlevelTarget or 0)
       local off = level == '0'
       local class = "-38"
-
+      
       luup.variable_set (SID.switch, "Target", off and '0' or '1', d)
+      luup.variable_set (SID.dimmer, "OnEffectLevel", level, d)
       luup.variable_set (SID.dimmer, "LoadLevelTarget", level, d)
-      if not off then luup.variable_set (SID.dimmer, "LoadLevelLast", level, d) end
-
+      
       local altid = luup.devices[d].id
       altid = altid: match (NIaltid) and altid..class or altid
       local value = "exact?level=" .. level
       Z.command (altid, value)
     end,
-
+  
   }
 
 
@@ -1168,8 +1164,10 @@ local function configureDevice (id, name, ldv, updaters, child)
     local types = {}
     for _, v in ipairs (classes["49"]) do
       local scale = v.meta.devtype
-      types[scale] = (types[scale] or 0) + 1
-      child[v.meta.altid] = true                            -- force child creation
+      if scale then 
+        types[scale] = (types[scale] or 0) + 1
+        child[v.meta.altid] = true                            -- force child creation
+      end
     end
     for _, v in ipairs (classes["48"] or {}) do    -- add motion sensors
       v.meta.upnp_file = DEV.motion
@@ -1177,7 +1175,7 @@ local function configureDevice (id, name, ldv, updaters, child)
       child[v.meta.altid] = true                            -- force child creation
     end
     for _, v in ipairs (classes["113"] or {}) do    -- add motion sensors
-      if v.meta.sub_class ~= "3" then         -- not a tamper switch
+      if v.meta.sub_class ~= "3" and v.meta.scale ~= "8" then         -- not a tamper switch or low battery notification
         v.meta.upnp_file = DEV.motion
         types["Alarm"] = (types["Alarm"] or 0) + 1
         child[v.meta.altid] = true                            -- force child creation
@@ -1191,7 +1189,7 @@ local function configureDevice (id, name, ldv, updaters, child)
 
   elseif classes["113"] and #classes["113"] > 1 then   -- sensor with tamper @rafale77
     local v = classes["113"][1]
-    if v.meta.sub_class ~= "3" then         -- ignore tamper switch
+    if v.meta.sub_class ~= "3" and v.meta.scale ~= "8" then         -- ignore tamper switch and low battery notification
       upnp_file, name = add_updater(v)
     end
   end
@@ -1368,6 +1366,7 @@ local function ZWayVDev_DUMMY_API (filename)
       request = function () end,
       command = function () end,
       devices = function () return D end,
+      status  = function () return {data = "OK"} end, 
     }
   end
 end
