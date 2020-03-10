@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 ABOUT = {
   NAME          = "L_ZWay2",
-  VERSION       = "2020.03.09",
+  VERSION       = "2020.03.10",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2020 AKBooer",
@@ -920,7 +920,7 @@ SensorMultilevel
   ["98"] = { "D_DoorLock1.xml",   S_DoorLock },
 
   ["102"] = { "D_BinaryLight1.xml",  S_SwitchPower, "D_GarageDoor_Linear.json" },    -- "Barrier Operator"
-  ["113"] = { "D_DoorSensor1.xml", S_Security, "D_DoorSensor1.json",     -- "Alarm Notifications"
+  ["113"] = { "D_DoorSensor1.xml", S_Security, "D_DoorSensor1.json",     -- "Alarm Notifications" @rafale77
      scale = {
 --  1	"Smoke"
 --	2	"CO"     -- "D_SmokeSensor1.xml"
@@ -937,9 +937,9 @@ SensorMultilevel
 --]]
     }},
   ["128"] = { nil, S_EnergyMetering },
-  ["145"] = { "D_SceneControllerLED1.xml", S_SceneControllerLED, "D_SceneControllerLED1.json"}, -- Leviton Zone/scene controller
+  ["145"] = { "D_SceneControllerLED1.xml", S_SceneControllerLED, "D_SceneControllerLED1.json"}, -- Leviton Zone/scene controller proprietary
   ["152"] = { "D_MotionSensor1.xml", S_Security },
-  ["156"] = { "D_MotionSensor1.xml", S_Security },    -- "Old alarm sensor"
+  ["156"] = { "D_FloodSensor1.xml", S_Security, "D_FloodSensor1.json" },    -- "Old alarm sensor"
 -- D_Siren1.xml
 -- D_SmokeSensor1.xml
 }
@@ -1059,7 +1059,7 @@ local function index_by_command_class (vDevs)
     local cc = ldv.meta.c_class
     local scale = ldv.meta.scale
     local ignore = dont_count[cc]
---    or (cc == "113" and scale == "7" and ldv.meta.sub_class == "3")  -- tamper switch
+--    or (cc == "113" and scale == "7" and ldv.meta.sub_class == "3")  -- tamper switch to be removed later in the code @rafale77
     if cc == "49" and scale == "4" then cc= "50" end   --  a class["50"]  -- (power)
     local x = classes[cc] or {}
     x[#x+1] = ldv
@@ -1101,6 +1101,7 @@ local function configureDevice (id, name, ldv, updaters, child)
       local scale = v.meta.c_class
       local ignore = dont_count[cc] or (cc == "49" and scale == "4")
         or (cc == "113" and scale == "7" and ldv.meta.sub_class == "3")  -- tamper switch
+        or (cc == "113" and scale == "8")                                -- low battery notification
       if not ignore then vDev = v end  -- find a useful command class
     end
     upnp_file, name = add_updater (vDev)                    -- create specific updater
@@ -1156,12 +1157,10 @@ local function configureDevice (id, name, ldv, updaters, child)
     local v = classes["98"][1]
     upnp_file, name = add_updater(v)
 
---  elseif classes["113"] and #classes["113"] == classes.n then   -- barrier
---    local v = classes["113"][1]    -- TODO: how to cope with multple motions??
---    upnp_file, name = add_updater (v)
---    upnp_file = DEV.motion      -- override default (door) sensor
+  elseif classes["156"] and #classes["156"] == 1 then         -- legacy water sensor
+    local v = classes["156"][1]
+    upnp_file, name = add_updater(v)
 
---  elseif classes["49"] and #classes["49"] > 1 then      -- a multi-sensor combo
   elseif classes["49"]  then                              -- a multi-sensor combo
     local meta = classes["49"][1].meta
     name = table.concat {"multi #", meta.node, '-', meta.instance}
@@ -1177,7 +1176,7 @@ local function configureDevice (id, name, ldv, updaters, child)
       child[v.meta.altid] = true                            -- force child creation
     end
     for _, v in ipairs (classes["113"] or {}) do    -- add motion sensors
-      if v.meta.sub_class ~= "3" then         -- not a tamper switch
+      if v.meta.sub_class ~= "3" and v.meta.scale ~= "8" then         -- not a tamper switch or low battery notification
         v.meta.upnp_file = DEV.motion
         types["Alarm"] = (types["Alarm"] or 0) + 1
         child[v.meta.altid] = true                            -- force child creation
@@ -1189,9 +1188,9 @@ local function configureDevice (id, name, ldv, updaters, child)
     for i,s in ipairs (display) do display[i] = table.concat {s,':',types[s], ' '} end
     luup.variable_set (SID.AltUI, "DisplayLine1", table.concat (display), id)
 
-  elseif classes["113"] and #classes["113"] > 1 then   -- sensor with tamper
+  elseif classes["113"] and #classes["113"] > 1 then   -- sensor with tamper @rafale77
     local v = classes["113"][1]
-    if v.meta.sub_class ~= "3" then         -- ignore tamper switch
+    if v.meta.sub_class ~= "3" and v.meta.scale ~= "8" then         -- ignore tamper switch and low battery notification
       upnp_file, name = add_updater(v)
     end
   end
