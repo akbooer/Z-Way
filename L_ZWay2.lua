@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 ABOUT = {
   NAME          = "L_ZWay2",
-  VERSION       = "2020.03.07",
+  VERSION       = "2020.03.09",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2020 AKBooer",
@@ -809,12 +809,12 @@ local vMap = {
   ["45"] = { "D_SceneControllerLED1.xml", S_SceneControllerLED, "D_SceneControllerLED1.json"}, -- Leviton Zone/scene controller
   ["48"] = { "D_MotionSensor1.xml",     S_Security ,        -- SensorBinary
     scale = {
---  1	"General purpose"
+        ["1"] = { nil, nil, "D_GlassBreakSensorWithTamper.json" }, --	1	"Glass Break"
 --	2	"Smoke"     -- "D_SmokeSensor1.xml"
 --	3	"CO"        -- "D_SmokeCoSensor1.json"
 --	4	"CO2"
 --	5	"Heat"
-        ["6"] = { nil, nil, "D_LeakSensor1.json" }, --	6	"Water"
+        ["6"] = { "D_FloodSensor1.xml", nil, "D_FloodSensor1.json" }, --	6	"Water"
 --	7	"Freeze"
 --	8	"Tamper"
 --	9	"Aux"
@@ -919,14 +919,27 @@ SensorMultilevel
 
   ["98"] = { "D_DoorLock1.xml",   S_DoorLock },
 
-  ["102"] = { "D_BinaryLight1.xml",  S_SwitchPower, "D_GarageDoor1.json" },    -- "Barrier Operator"
-  ["113"] = { "D_DoorSensor1.xml", S_Security, "D_DoorSensor1.json" },    -- Switch
+  ["102"] = { "D_BinaryLight1.xml",  S_SwitchPower, "D_GarageDoor_Linear.json" },    -- "Barrier Operator"
+  ["113"] = { "D_DoorSensor1.xml", S_Security, "D_DoorSensor1.json",     -- "Alarm Notifications"
+     scale = {
+--  1	"Smoke"
+--	2	"CO"     -- "D_SmokeSensor1.xml"
+--	3	"CO2"    -- "D_SmokeCoSensor1.json"
+--	4	"Heat"
+      ["5"] = { "D_FloodSensor1.xml", S_Security, "D_FloodSensor1.json" }, -- "Water"
+      ["6"] = { "D_DoorSensor1.xml", S_Security, "D_DoorSensor1.json" }, -- "Access Control"
+      ["7"] = { "D_MotionSensor1.xml", S_Security, "D_MotionSensor1.json" }, --	7	"Tamper or generic motion"
+--	8	"Power"
+--	9	"System"
+--  10 "Emergency"
+--	11 "Tilt"
+--	12 "Motion"
+--]]
+    }},
   ["128"] = { nil, S_EnergyMetering },
   ["145"] = { "D_SceneControllerLED1.xml", S_SceneControllerLED, "D_SceneControllerLED1.json"}, -- Leviton Zone/scene controller
   ["152"] = { "D_MotionSensor1.xml", S_Security },
-  ["156"] = { "D_MotionSensor1.xml", S_Security },    -- Tamper switch?
-
-
+  ["156"] = { "D_MotionSensor1.xml", S_Security },    -- "Old alarm sensor"
 -- D_Siren1.xml
 -- D_SmokeSensor1.xml
 }
@@ -1045,8 +1058,8 @@ local function index_by_command_class (vDevs)
   for _, ldv in pairs(vDevs) do
     local cc = ldv.meta.c_class
     local scale = ldv.meta.scale
-    local ignore = dont_count[cc] or
-        (cc == "113" and scale == "7" and ldv.meta.sub_class == "8")  -- tamper switch
+    local ignore = dont_count[cc]
+--    or (cc == "113" and scale == "7" and ldv.meta.sub_class == "3")  -- tamper switch
     if cc == "49" and scale == "4" then cc= "50" end   --  a class["50"]  -- (power)
     local x = classes[cc] or {}
     x[#x+1] = ldv
@@ -1087,7 +1100,7 @@ local function configureDevice (id, name, ldv, updaters, child)
       local cc = v.meta.c_class
       local scale = v.meta.c_class
       local ignore = dont_count[cc] or (cc == "49" and scale == "4")
-        or (cc == "113" and scale == "7" and ldv.meta.sub_class == "8")  -- tamper switch
+        or (cc == "113" and scale == "7" and ldv.meta.sub_class == "3")  -- tamper switch
       if not ignore then vDev = v end  -- find a useful command class
     end
     upnp_file, name = add_updater (vDev)                    -- create specific updater
@@ -1164,7 +1177,7 @@ local function configureDevice (id, name, ldv, updaters, child)
       child[v.meta.altid] = true                            -- force child creation
     end
     for _, v in ipairs (classes["113"] or {}) do    -- add motion sensors
-      if v.meta.sub_class ~= "8" then         -- not a tamper switch
+      if v.meta.sub_class ~= "3" then         -- not a tamper switch
         v.meta.upnp_file = DEV.motion
         types["Alarm"] = (types["Alarm"] or 0) + 1
         child[v.meta.altid] = true                            -- force child creation
@@ -1175,8 +1188,13 @@ local function configureDevice (id, name, ldv, updaters, child)
     table.sort(display)
     for i,s in ipairs (display) do display[i] = table.concat {s,':',types[s], ' '} end
     luup.variable_set (SID.AltUI, "DisplayLine1", table.concat (display), id)
-  end
 
+  elseif classes["113"] and #classes["113"] > 1 then   -- sensor with tamper
+    local v = classes["113"][1]
+    if v.meta.scale and v.meta.sub_class ~= "3" then         -- ignore tamper switch
+      upnp_file, name = add_updater(v)
+    end
+  end
   -- power meter service variables (for any device)
   if classes["50"] then
     for _, meter in ipairs (classes["50"]) do
