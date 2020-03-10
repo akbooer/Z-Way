@@ -90,6 +90,7 @@ local SID = {          -- schema implementation or shorthand name ==> serviceId
 
     switch      = "urn:upnp-org:serviceId:SwitchPower1",
     dimmer      = "urn:upnp-org:serviceId:Dimming1",
+    doorlock    = "urn:micasaverde-com:serviceId:DoorLock1",
 
     setpoint      = "urn:upnp-org:serviceId:TemperatureSetpoint1",
     setpointHeat  = "urn:upnp-org:serviceId:TemperatureSetpoint1_Heat",
@@ -157,6 +158,11 @@ end
 
 local function open_or_close (x)
   local y = {["open"] = "0", ["close"] = "1", ["0"] = "open", ["1"] = "close"}
+  return y[x] or x
+end
+
+local function rev_open_or_close (x)
+  local y = {["open"] = "1", ["close"] = "0", ["1"] = "open", ["0"] = "close"}
   return y[x] or x
 end
 
@@ -232,7 +238,7 @@ local S_SwitchPower = {
       local level = tostring(args.newTargetValue or 0)
       local off = level == '0'
       local class ="-37"
-      
+
       luup.variable_set (SID.switch, "Target", off and '0' or '1', d)
       local dimmer = luup.variable_get(SID.dimmer, "OnEffectLevel",d)  -- check for dimmer
       if dimmer then
@@ -241,10 +247,16 @@ local S_SwitchPower = {
           luup.variable_set (SID.dimmer, "LoadLevelTarget", off and '0' or dimmer, d)
         end
       end
-      
+      local value = on_or_off (level)
+
+      local gdo = luup.variable_get(SID.doorlock, "Status",d) -- check garage door
+      if gdo then
+        class = "-102"
+        value = rev_open_or_close(level)
+      end
+
       local altid = luup.devices[d].id
       altid = altid: match (NIaltid) and altid..class or altid
-      local value = on_or_off (level)
       Z.command (altid, value)
     end,
 
@@ -260,17 +272,17 @@ local S_Dimming = {
       local level = tostring (args.newLoadlevelTarget or 0)
       local off = level == '0'
       local class = "-38"
-      
+
       luup.variable_set (SID.switch, "Target", off and '0' or '1', d)
       luup.variable_set (SID.dimmer, "OnEffectLevel", level, d)
       luup.variable_set (SID.dimmer, "LoadLevelTarget", level, d)
-      
+
       local altid = luup.devices[d].id
       altid = altid: match (NIaltid) and altid..class or altid
       local value = "exact?level=" .. level
       Z.command (altid, value)
     end,
-  
+
   }
 
 
@@ -705,7 +717,7 @@ local command_class = {
 
   -- barrier operator (eg. garage door)
   ["102"] = function (d, inst)
-      setVar ("Status",open_or_close (inst.metrics.level), SID[S_DoorLock], d)
+      setVar ("Status", rev_open_or_close(inst.metrics.level), SID[S_SwitchPower], d) -- correct readback for garage door
   end,
 
   -- battery
@@ -1164,7 +1176,7 @@ local function configureDevice (id, name, ldv, updaters, child)
     local types = {}
     for _, v in ipairs (classes["49"]) do
       local scale = v.meta.devtype
-      if scale then 
+      if scale then
         types[scale] = (types[scale] or 0) + 1
         child[v.meta.altid] = true                            -- force child creation
       end
@@ -1366,7 +1378,7 @@ local function ZWayVDev_DUMMY_API (filename)
       request = function () end,
       command = function () end,
       devices = function () return D end,
-      status  = function () return {data = "OK"} end, 
+      status  = function () return {data = "OK"} end,
     }
   end
 end
