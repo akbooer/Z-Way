@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 ABOUT = {
   NAME          = "L_ZWay2",
-  VERSION       = "2020.03.07",
+  VERSION       = "2020.03.10",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2020 AKBooer",
@@ -62,7 +62,7 @@ local POLLRATE  -- poll rate for Zway devices
 
 local CLONEROOMS    --
 local NAMEDEVICES   --
-local ZERODIMMER    -- 
+local ZERODIMMER    --
 
 local service_schema = {}    -- serviceId ==> schema implementation
 
@@ -222,29 +222,33 @@ vDev commands:
 
 local NIaltid = "^%d+%-%d+$"      -- altid of just node-instance format (ie. not child vDev)
 
-
 local S_SwitchPower = {
 
     ---------------
-    -- 2020.03.02  thanks to @rafale77 for extensive testing and code changes
+    -- 2020.03.02   thanks to @rafale77 for extensive testing and code changes
     --
     SetTarget = function (d, args)
       local level = tostring(args.newTargetValue or 0)
       local off = level == '0'
       local class ="-37"
-      
+
       luup.variable_set (SID.switch, "Target", off and '0' or '1', d)
-      local dimmer = luup.variable_get(SID.dimmer, "OnEffectLevel",d)  -- check for dimmer
+      local dimmer = luup.variable_get(SID.dimmer, "LoadLevelTarget",d)  -- check for dimmer
       if dimmer then
-        class =  "-38"
+        class = "-38"
         if ZERODIMMER then
           luup.variable_set (SID.dimmer, "LoadLevelTarget", off and '0' or dimmer, d)
         end
+        if off then
+          luup.variable_set(SID.dimmer, "LoadLevelLast", dimmer, d)
+        else
+          local lastdim = luup.variable_get(SID.dimmer, "LoadLevelLast",d)
+        end
+        luup.variable_set (SID.dimmer, "LoadLevelTarget", off and '0' or lastdim, d)
       end
-      
       local altid = luup.devices[d].id
       altid = altid: match (NIaltid) and altid..class or altid
-      local value = on_or_off (level)
+      local value = on_or_off (args.newTargetValue)
       Z.command (altid, value)
     end,
 
@@ -260,17 +264,17 @@ local S_Dimming = {
       local level = tostring (args.newLoadlevelTarget or 0)
       local off = level == '0'
       local class = "-38"
-      
+
       luup.variable_set (SID.switch, "Target", off and '0' or '1', d)
-      luup.variable_set (SID.dimmer, "OnEffectLevel", level, d)
       luup.variable_set (SID.dimmer, "LoadLevelTarget", level, d)
-      
+      if not off then luup.variable_set (SID.dimmer, "LoadLevelLast", level, d) end
+
       local altid = luup.devices[d].id
       altid = altid: match (NIaltid) and altid..class or altid
       local value = "exact?level=" .. level
       Z.command (altid, value)
     end,
-  
+
   }
 
 
@@ -363,6 +367,32 @@ local S_Generic         = { }
 local S_Humidity        = { }
 local S_Light           = { }
 local S_SceneController = { }
+local S_SceneControllerLED = {
+
+SetLight = function (d, args)
+  local altid = luup.devices[d].id
+  local id, inst = altid: match "^(%d+)%-(%d+)$"
+  local cc = 145     --command class
+  local color = tonumber(args.newValue)
+  local bit=require("bit")
+  local indicator = args.Indicator
+  local data = "[%s,0,29,13,1,255,%s,0,0,10]"
+  local ItoL = {["1"] = 1, ["2"] = 2, ["3"] = 4, ["4"] = 8, ["5"] = 15}
+  local led = ItoL[indicator]
+  if led then
+    if color == 2 then led = bit.lshift(led,4)
+    elseif color == 3 then led = led + bit.lshift(led,4)
+    elseif color == 0 then led = 0
+    end
+    data = data: format(cc,led)
+    Z.zwsend(id,data)
+  end
+end,
+
+ }
+SID[S_SceneControllerLED] = "urn:micasaverde-com:serviceId:SceneControllerLED1"
+
+local S_WindowCovering  = { }
 local S_Unknown         = { }   -- "catch-all" service
 
 
@@ -532,6 +562,7 @@ SID [S_Light]           = "urn:micasaverde-com:serviceId:LightSensor1"
 SID [S_Security]        = "urn:micasaverde-com:serviceId:SecuritySensor1"
 SID [S_SwitchPower]     = "urn:upnp-org:serviceId:SwitchPower1"
 SID [S_Temperature]     = "urn:upnp-org:serviceId:TemperatureSensor1"
+SID [S_WindowCovering]  = "urn:micasaverde-com:serviceId:WindowCovering1"
 
 
 for schema, sid in pairs (SID) do -- reverse look-up  sid ==> schema
@@ -776,14 +807,15 @@ local vMap = {
 
   ["37"] = { "D_BinaryLight1.xml",      S_SwitchPower       },
   ["38"] = { "D_DimmableLight1.xml",    S_Dimming },
+  ["45"] = { "D_SceneControllerLED1.xml", S_SceneControllerLED, "D_SceneControllerLED1.json"}, -- Leviton Zone/scene controller
   ["48"] = { "D_MotionSensor1.xml",     S_Security ,        -- SensorBinary
     scale = {
---  1	"General purpose"
+        ["1"] = { nil, nil, "D_GlassBreakSensorWithTamper.json" }, --	1	"Glass Break"
 --	2	"Smoke"     -- "D_SmokeSensor1.xml"
 --	3	"CO"        -- "D_SmokeCoSensor1.json"
 --	4	"CO2"
 --	5	"Heat"
-        ["6"] = { nil, nil, "D_LeakSensor1.json" }, --	6	"Water"
+        ["6"] = { "D_FloodSensor1.xml", nil, "D_FloodSensor1.json" }, --	6	"Water"
 --	7	"Freeze"
 --	8	"Tamper"
 --	9	"Aux"
@@ -888,13 +920,27 @@ SensorMultilevel
 
   ["98"] = { "D_DoorLock1.xml",   S_DoorLock },
 
-  ["102"] = { "D_BinaryLight1.xml",  S_SwitchPower, "D_GarageDoor1.json" },    -- "Barrier Operator"
-  ["113"] = { "D_DoorSensor1.xml", S_Security },    -- Switch
+  ["102"] = { "D_BinaryLight1.xml",  S_SwitchPower, "D_GarageDoor_Linear.json" },    -- "Barrier Operator"
+  ["113"] = { "D_DoorSensor1.xml", S_Security, "D_DoorSensor1.json",     -- "Alarm Notifications" @rafale77
+     scale = {
+--  1	"Smoke"
+--	2	"CO"     -- "D_SmokeSensor1.xml"
+--	3	"CO2"    -- "D_SmokeCoSensor1.json"
+--	4	"Heat"
+      ["5"] = { "D_FloodSensor1.xml", S_Security, "D_FloodSensor1.json" }, -- "Water"
+      ["6"] = { "D_DoorSensor1.xml", S_Security, "D_DoorSensor1.json" }, -- "Access Control"
+      ["7"] = { "D_MotionSensor1.xml", S_Security, "D_MotionSensor1.json" }, --	7	"Tamper or generic motion"
+--	8	"Power"
+--	9	"System"
+--  10 "Emergency"
+--	11 "Tilt"
+--	12 "Motion"
+--]]
+    }},
   ["128"] = { nil, S_EnergyMetering },
+  ["145"] = { "D_SceneControllerLED1.xml", S_SceneControllerLED, "D_SceneControllerLED1.json"}, -- Leviton Zone/scene controller proprietary
   ["152"] = { "D_MotionSensor1.xml", S_Security },
-  ["156"] = { "D_MotionSensor1.xml", S_Security },    -- Tamper switch?
-
-
+  ["156"] = { "D_FloodSensor1.xml", S_Security, "D_FloodSensor1.json" },    -- "Old alarm sensor"
 -- D_Siren1.xml
 -- D_SmokeSensor1.xml
 }
@@ -945,7 +991,7 @@ local function vDev_meta (v)
     return {
       name      = v.metrics.title,
       level     = v.metrics.level,
-      
+
       upnp_file = upnp_file,
       service   = service,
       json_file = json_file,
@@ -1013,8 +1059,8 @@ local function index_by_command_class (vDevs)
   for _, ldv in pairs(vDevs) do
     local cc = ldv.meta.c_class
     local scale = ldv.meta.scale
-    local ignore = dont_count[cc] or
-        (cc == "113" and scale == "7" and ldv.meta.sub_class == "8")  -- tamper switch
+    local ignore = dont_count[cc]
+--    or (cc == "113" and scale == "7" and ldv.meta.sub_class == "3")  -- tamper switch to be removed later in the code @rafale77
     if cc == "49" and scale == "4" then cc= "50" end   --  a class["50"]  -- (power)
     local x = classes[cc] or {}
     x[#x+1] = ldv
@@ -1055,7 +1101,8 @@ local function configureDevice (id, name, ldv, updaters, child)
       local cc = v.meta.c_class
       local scale = v.meta.c_class
       local ignore = dont_count[cc] or (cc == "49" and scale == "4")
-        or (cc == "113" and scale == "7" and ldv.meta.sub_class == "8")  -- tamper switch
+        or (cc == "113" and scale == "7" and ldv.meta.sub_class == "3")  -- tamper switch
+        or (cc == "113" and scale == "8")                                -- low battery notification
       if not ignore then vDev = v end  -- find a useful command class
     end
     upnp_file, name = add_updater (vDev)                    -- create specific updater
@@ -1111,12 +1158,10 @@ local function configureDevice (id, name, ldv, updaters, child)
     local v = classes["98"][1]
     upnp_file, name = add_updater(v)
 
-  elseif classes["113"] and #classes["113"] == classes.n then   -- barrier
-    local v = classes["113"][1]    -- TODO: how to cope with multple motions??
-    upnp_file, name = add_updater (v)
-    upnp_file = DEV.motion      -- override default (door) sensor
+  elseif classes["156"] and #classes["156"] == 1 then         -- legacy water sensor
+    local v = classes["156"][1]
+    upnp_file, name = add_updater(v)
 
---  elseif classes["49"] and #classes["49"] > 1 then      -- a multi-sensor combo
   elseif classes["49"]  then                              -- a multi-sensor combo
     local meta = classes["49"][1].meta
     name = table.concat {"multi #", meta.node, '-', meta.instance}
@@ -1132,7 +1177,7 @@ local function configureDevice (id, name, ldv, updaters, child)
       child[v.meta.altid] = true                            -- force child creation
     end
     for _, v in ipairs (classes["113"] or {}) do    -- add motion sensors
-      if v.meta.sub_class ~= "8" then         -- not a tamper switch
+      if v.meta.sub_class ~= "3" then         -- not a tamper switch
         v.meta.upnp_file = DEV.motion
         types["Alarm"] = (types["Alarm"] or 0) + 1
         child[v.meta.altid] = true                            -- force child creation
@@ -1143,8 +1188,13 @@ local function configureDevice (id, name, ldv, updaters, child)
     table.sort(display)
     for i,s in ipairs (display) do display[i] = table.concat {s,':',types[s], ' '} end
     luup.variable_set (SID.AltUI, "DisplayLine1", table.concat (display), id)
-  end
 
+  elseif classes["113"] and #classes["113"] > 1 then   -- sensor with tamper @rafale77
+    local v = classes["113"][1]
+    if v.meta.sub_class ~= "3" then         -- ignore tamper switch
+      upnp_file, name = add_updater(v)
+    end
+  end
   -- power meter service variables (for any device)
   if classes["50"] then
     for _, meter in ipairs (classes["50"]) do
@@ -1177,12 +1227,12 @@ local function index_nodes (d, room0)
       t[#t+1] = v
       index[n_i] = t
       local location = v.location or 0
-      if CLONEROOMS and location ~= 0 then 
-        room_index[n_i] =  
+      if CLONEROOMS and location ~= 0 then
+        room_index[n_i] =
           luup.rooms.create (v.locationName or ("ZWay Room " .. location))  -- may already exist
       end
     end
-  end  
+  end
   return index, room_index
 end
 
@@ -1331,7 +1381,7 @@ end
 local function ZWayVDev_API (ip, sid)
 
   local cookie = "ZWAYSession=" .. (sid or '')
-  
+
   local function HTTP_request (url, body)
     local response_body = {}
     local method = body and "POST" or "GET"
@@ -1367,8 +1417,8 @@ local function ZWayVDev_API (ip, sid)
 
     if j then
       local sid = j and j.data and j.data.sid
-      if sid then 
-        cookie = "ZWAYSession=" .. sid 
+      if sid then
+        cookie = "ZWAYSession=" .. sid
         setVar ("ZWAYSession", sid)
       end
     end
@@ -1396,6 +1446,12 @@ local function ZWayVDev_API (ip, sid)
     return HTTP_request_json (request)
   end
 
+  local function zwsend (id, data)
+    local url = "http://%s:8083/ZWaveAPI/Run/SendData(%s,%s)"
+    local request = url: format (ip, id, data)
+    return HTTP_request_json (request)
+  end
+
   -- send a generic request
   local function request (req)
     local url = "http://%s:8083%s"
@@ -1404,17 +1460,18 @@ local function ZWayVDev_API (ip, sid)
   end
 
   local function status ()
-  local url = "http://%s:8083/ZAutomation/api/v1/status"
-  local _, d = HTTP_request_json (url: format (ip))
-  return d
+    local url = "http://%s:8083/ZAutomation/api/v1/status"
+    local _, d = HTTP_request_json (url: format (ip))
+    return d
   end
-  
+
   -- ZWayVDev()
   return {
     request = request,    -- for low-level access
     status  = status,
     command = command,
     zwcommand = zwcommand,
+    zwsend = zwsend,
     devices = devices,
     authenticate = authenticate}
 
@@ -1425,7 +1482,7 @@ end
 function _G.Login (p)
   debug (json.encode(p))
   local j = Z.authenticate (p.Username, p.Password)
-  if j then 
+  if j then
     setVar ("DisplayLine1", "Restart required", SID.AltUI)
     luup.set_failure (0, devNo)
   end
@@ -1454,20 +1511,20 @@ function init(devNo)
 
 	POLLRATE = uiVar ("Pollrate", 2)
   POLLRATE = math.min (tonumber(POLLRATE) or 0, 0.5)
-  
+
 --  local user     = uiVar ("Username", "admin")
 --	local password = uiVar ("Password", "razberry")
 
   CLONEROOMS  = uiVar ("CloneRooms", '')              -- if true, clone rooms and place devices there
   NAMEDEVICES = uiVar ("NameDevices", '')             -- if true, copy device names from ZWay
   ZERODIMMER  = uiVar ("ZeroDimmerWhenOff", "true")   -- if true, zero dimmer sliders when off
-  
+
   CLONEROOMS  = is_true (CLONEROOMS)
   NAMEDEVICES = is_true (NAMEDEVICES)
   ZERODIMMER  = is_true (ZERODIMMER)
 
   local testfile = uiVar ("Test_JSON_File", '')
-  
+
   -- Authenticate
   do
     if testfile ~= '' then
@@ -1475,8 +1532,8 @@ function init(devNo)
     else
       local session = getVar "ZWAYSession"
       Z = ZWayVDev_API (ip, session)
-    end  
-  end  
+    end
+  end
   --
 
   setVar ("DisplayLine1", '', SID.AltUI)
@@ -1486,7 +1543,7 @@ function init(devNo)
   setVar ("Offset", OFFSET)
 
   local status, comment
-  
+
   luup.set_failure (0, devNo)	        -- openLuup is UI7 compatible
   status, comment = true, "OK"
 
@@ -1500,12 +1557,12 @@ function init(devNo)
   -- make sure room exists
   local Remote_ID = 31415926
   setVar ("Remote_ID", Remote_ID, SID.bridge)  -- 2020.02.12   use as unique remote ID
-  
+
   local room_name = "ZWay-" .. Remote_ID
   local room_number = luup.rooms.create (room_name)   -- may already exist
 
-  local ok = Z.status()  
-  if ok and ok.data == "OK" then 
+  local ok = Z.status()
+  if ok and ok.data == "OK" then
     local vDevs = Z.devices ()
     cclass_update = createChildren (devNo, vDevs, room_number, OFFSET)
     _G.updateChildren (vDevs)
