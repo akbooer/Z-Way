@@ -4,7 +4,7 @@ module(..., package.seeall)
 
 ABOUT = {
   NAME          = "zway_cgi",
-  VERSION       = "2020.02.28",
+  VERSION       = "2020.03.08",
   DESCRIPTION   = "a WSAPI CGI proxy configuring the ZWay plugin",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2020 AKBooer",
@@ -124,8 +124,8 @@ local function bridge_post (form)
   -- update all the Children variables in the nodes
   local children = dev:get_children()   -- get the device numbers of the bridge node devices
   for _,n in ipairs (children) do
-    local specified = luup.variable_get (SID.ZWay, "Children", n)
-    if specified then
+    local specified = luup.variable_get (SID.ZWay, "Children", n) or ''
+--    if specified then
       local n_i = luup.devices[n].id    -- get the (alt)id
       local new = ticked[n_i]
       if new then 
@@ -137,7 +137,7 @@ local function bridge_post (form)
       if specified ~= new then    -- it's changed! so update
         luup.variable_set (SID.ZWay, "Children", new, n) 
       end
-    end
+--    end
   end
   
 end
