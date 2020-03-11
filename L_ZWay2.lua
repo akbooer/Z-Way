@@ -1222,7 +1222,6 @@ local function configureDevice (id, name, ldv, updaters, child)
           v.meta.upnp_file = DEV.motion
           types["Alarm"] = (types["Alarm"] or 0) + 1
           child[v.meta.altid] = true        -- force child creation
-        end
       end
     end
     local display = {}
