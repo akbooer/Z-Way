@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 ABOUT = {
   NAME          = "L_ZWay2",
-  VERSION       = "2020.03.10",
+  VERSION       = "2020.03.11",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2020 AKBooer",
@@ -38,6 +38,8 @@ ABOUT = {
 -- 2020.02.25  add intermediate instance nodes
 -- 2020.02.26  change node numbering scheme
 -- 2020.03.02  significant improvements to dimmer handling thanks to @rafale77
+-- ...         sundry iterations on GitHub
+-- 2020.03.11  add SendData action (thanks @DesT)
 
 
 -----------------
@@ -270,6 +272,7 @@ local S_Dimming = {
       local level = tostring (args.newLoadlevelTarget or 0)
       local off = level == '0'
       local class = "-38"
+      
       luup.variable_set (SID.switch, "Target", off and '0' or '1', d)
       luup.variable_set (SID.dimmer, "OnEffectLevel", level, d)
       luup.variable_set (SID.dimmer, "LoadLevelTarget", level, d)
@@ -278,8 +281,6 @@ local S_Dimming = {
       altid = altid: match (NIaltid) and altid..class or altid
       local value = "exact?level=" .. level
       Z.command (altid, value)
-      local dv = d.."-"..level
-
     end,
 
   }
@@ -723,8 +724,9 @@ local command_class = {
 
   -- barrier operator (eg. garage door)
   ["102"] = function (d, inst)
-      setVar ("Status", rev_open_or_close (inst.metrics.level), SID[S_DoorLock], d)
-      setVar ("Status", rev_open_or_close(inst.metrics.level), SID[S_SwitchPower], d) -- correct readback for garage door
+    local status = rev_open_or_close (inst.metrics.level)
+    setVar ("Status", status, SID[S_DoorLock], d)
+    setVar ("Status", status, SID[S_SwitchPower], d) -- correct readback for garage door
   end,
 
   -- battery
@@ -1125,7 +1127,7 @@ local function configureDevice (id, name, ldv, updaters, child)
   elseif classes["64"] and classes["67"] and classes["49"] then    -- a thermostat
     -- may have temp sensor [49], fan speed [68], setpoints [67], ...
     -- ... operating state, operating mode, energy metering, ...
--- command_class ["68"] Fan_mode
+    -- command_class ["68"] Fan_mode
     local tstat = classes["64"][1]
     upnp_file, name = add_updater (tstat)
     local fmode = classes["68"]
@@ -1160,10 +1162,6 @@ local function configureDevice (id, name, ldv, updaters, child)
     upnp_file = v.meta.upnp_file
     name = v.metrics.title
     -- updaters are set at the end of this if-then-elseif statement
-
---  elseif classes["37"] and #classes["37"] == classes.n then   -- just a bank of switches
---    name = classes["37"][1].metrics.title
---    -- how to handle multiple switches ???
 
   elseif classes["102"] and #classes["102"] == 1 then         -- door lock (barrier)
     local v = classes["102"][1]
@@ -1277,17 +1275,6 @@ local function createChildren (bridgeDevNo, vDevs, room, OFFSET)
     end
     return id
   end
-
-   --[[
-
-           -- update device name and location, if required
-   --        if altid == zDev.id
-   --        and inst.metrics.title ~= zDev.description then
-   --          log (table.concat {"renaming device, old --> new: ", zDev.description, " --> ", inst.metrics.title})
-   --          zDev: rename (inst.metrics.title)
-   --        end
-
-   --]]
 
   local function checkDeviceExists (parent, id, name, altid, upnp_file, json_file, room)
     local dev = luup.devices[id]
@@ -1496,7 +1483,9 @@ local function ZWayVDev_API (ip, sid)
 end
 
 
--- ACTION Login
+-- Specific ACTIONS
+--
+--Login
 function _G.Login (p)
   debug (json.encode(p))
   local j = Z.authenticate (p.Username, p.Password)
@@ -1506,6 +1495,14 @@ function _G.Login (p)
   end
 end
 
+--SendData
+function SendData (p)
+  debug (json.encode(p))
+  local node, data = p.Node, p.Data
+  if node and data then 
+    Z.zwsend (node, data)
+  end
+end
 
 -----------------------------------------
 --
