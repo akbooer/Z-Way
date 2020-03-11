@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 ABOUT = {
   NAME          = "L_ZWay2",
-  VERSION       = "2020.03.10",
+  VERSION       = "2020.03.11b",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2020 AKBooer",
@@ -38,6 +38,8 @@ ABOUT = {
 -- 2020.02.25  add intermediate instance nodes
 -- 2020.02.26  change node numbering scheme
 -- 2020.03.02  significant improvements to dimmer handling thanks to @rafale77
+-- ...         sundry iterations on GitHub
+-- 2020.03.11  add SendData action (thanks @DesT), fix nil setpoint serviceId
 
 
 -----------------
@@ -270,6 +272,7 @@ local S_Dimming = {
       local level = tostring (args.newLoadlevelTarget or 0)
       local off = level == '0'
       local class = "-38"
+
       luup.variable_set (SID.switch, "Target", off and '0' or '1', d)
       luup.variable_set (SID.dimmer, "OnEffectLevel", level, d)
       luup.variable_set (SID.dimmer, "LoadLevelTarget", level, d)
@@ -278,8 +281,6 @@ local S_Dimming = {
       altid = altid: match (NIaltid) and altid..class or altid
       local value = "exact?level=" .. level
       Z.command (altid, value)
-      local dv = d.."-"..level
-
     end,
 
   }
@@ -320,7 +321,7 @@ local S_Temperature = {
 local S_Security = {
 
     SetArmed = function (d, args)
-      luup.variable_set (args.serviceId, "Armed", args.newArmedValue or '0', d)
+      luup.variable_set ("urn:micasaverde-com:serviceId:SecuritySensor1", "Armed", args.newArmedValue or '0', d)
     end,
 
   }
@@ -425,7 +426,7 @@ local S_HVAC_FanMode = {
     local altid = luup.devices[d].id
     local id, inst = altid: match "^(%d+)%-(%d+)$"
     local cc = 68     --command class
-    local sid = args.serviceId
+    local sid = "urn:upnp-org:serviceId:HVAC_FanOperatingMode1"
     local VtoZ = {Auto = "Set(1,0)", ContinuousOn = "Set(1,1)", PeriodicOn = "Set(1,0)"}
     local cmd = VtoZ[value]
     if cmd then
@@ -447,8 +448,6 @@ SID[S_HVAC_FanMode] = "urn:upnp-org:serviceId:HVAC_FanOperatingMode1"
 
 local S_HVAC_State = { --[[
 --["66"] Operating_state
---  ["67"]  -- Setpoint
-        --Setpoint
         --	Heating,Cooling,Furnace,Dry Air,Moist Air,Auto Change Over,Energy Save Heating,Energy Save Cooling,Away Heating,Away Cooling,Full Power
 urn:micasaverde-com:serviceId:HVAC_OperatingState1,ModeState=Off
 
@@ -471,7 +470,7 @@ local S_HVAC_UserMode = {
     local altid = luup.devices[d].id
     local id, inst = altid: match "^(%d+)%-(%d+)$"
     local cc = 64     --command class
-    local sid = args.serviceId
+    local sid = "urn:upnp-org:serviceId:HVAC_UserOperatingMode1"
     if valid[value] then
       local VtoZ = {Off = "Set(0)", HeatOn = "Set(1)", CoolOn = "Set(2)", AutoChangeOver = "Set(3)"}
       local cmd = VtoZ[value]
@@ -514,6 +513,25 @@ urn:upnp-org:serviceId:FanSpeed1,DirectionStatus=0
 SID[S_HVAC_FanSpeed] = "urn:upnp-org:serviceId:FanSpeed1"
 
 
+local function SetCurrentSetpoint (sid, d, args)
+  local level = args.NewCurrentSetpoint
+  if level then
+    luup.variable_set (sid, "CurrentSetpoint", level, d)
+    local value = "exact?level=" .. level
+    local altid = luup.devices[d].id
+    altid = altid: match (NIaltid)
+    if altid then
+      local suffix = {
+        [SID.setpoint]      = "-67",
+        [SID.setpointHeat]  = "-67-1",
+        [SID.setpointCool]  = "-67-2",
+      }
+      altid = altid .. (suffix[sid] or '')
+      Z.command (altid, value)
+    end
+  end
+end
+
 local S_TemperatureSetpoint = {
 
     GetApplication = Application.get,
@@ -525,25 +543,9 @@ local S_TemperatureSetpoint = {
     GetName = Name.get,
     SetName = Name.set,
 
-    SetCurrentSetpoint = function (d, args)
-      local level = args.NewCurrentSetpoint
-      if level then
-        local sid = args.serviceId
-        luup.variable_set (sid, "CurrentSetpoint", level, d)
-        local value = "exact?level=" .. level
-        local altid = luup.devices[d].id
-        altid = altid: match (NIaltid)
-        if altid then
-          local suffix = {
-            [SID.setpoint]      = "-67",
-            [SID.setpointHeat]  = "-67-1",
-            [SID.setpointCool]  = "-67-2",
-          }
-          altid = altid .. (suffix[args.serviceId] or '')
-          Z.command (altid, value)
-        end
-      end
-    end,
+    SetCurrentSetpoint = function (...)
+      return SetCurrentSetpoint (SID[S_TemperatureSetpoint], ...)
+    end
 
 }
 
@@ -555,7 +557,16 @@ end
 
 -- these copies MUST be separate tables, since they're used to index the SID table
 local S_TemperatureSetpointHeat = shallow_copy (S_TemperatureSetpoint)
+
+S_TemperatureSetpointHeat.SetCurrentSetpoint = function (...)
+  return SetCurrentSetpoint (SID[S_TemperatureSetpointHeat], ...)
+end
+
 local S_TemperatureSetpointCool = shallow_copy (S_TemperatureSetpoint)
+S_TemperatureSetpointCool.SetCurrentSetpoint = function (...)
+  return SetCurrentSetpoint (SID[S_TemperatureSetpointCool], ...)
+end
+
 
 SID [S_TemperatureSetpoint]         = SID.setpoint
 SID [S_TemperatureSetpointHeat]     = SID.setpointHeat
@@ -699,6 +710,10 @@ local command_class = {
   end,
 
   ["66"] = function (d, inst)       -- Operating_state
+     local ZtoV = {["0"] = "Idle", ["1"] = "Heating", ["2"] = "Cooling"}
+     local level = inst.metrics.level
+     sid = "urn:micasaverde-com:serviceId:HVAC_OperatingState1"
+     setVar ("ModeState", ZtoV[level] or level, sid, d)
   end,
 
   ["67"] = function (d, inst, meta)       -- Setpoint
@@ -716,15 +731,20 @@ local command_class = {
     end
   end,
 
-  ["68"] = function (d, inst)       -- ThermostatFanMode
+  ["69"] = function (d, inst)       -- ThermostatFanState
     --	Auto Low,On Low,Auto High,On High,Auto Medium,On Medium,Circulation,Humidity and circulation,Left and right,Up and down,Quite
+    local ZtoV = {["0"] = "Off", ["1"] = "On"}
+    local level = inst.metrics.level
+    sid = "urn:micasaverde-com:serviceId:HVAC_FanOperatingMode1"
+    setVar ("FanStatus", ZtoV[level] or level, sid, d)
   end,
 
 
   -- barrier operator (eg. garage door)
   ["102"] = function (d, inst)
-      setVar ("Status", rev_open_or_close (inst.metrics.level), SID[S_DoorLock], d)
-      setVar ("Status", rev_open_or_close(inst.metrics.level), SID[S_SwitchPower], d) -- correct readback for garage door
+    local status = rev_open_or_close (inst.metrics.level)
+    setVar ("Status", status, SID[S_DoorLock], d)
+    setVar ("Status", status, SID[S_SwitchPower], d) -- correct readback for garage door
   end,
 
   -- battery
@@ -1125,9 +1145,17 @@ local function configureDevice (id, name, ldv, updaters, child)
   elseif classes["64"] and classes["67"] and classes["49"] then    -- a thermostat
     -- may have temp sensor [49], fan speed [68], setpoints [67], ...
     -- ... operating state, operating mode, energy metering, ...
--- command_class ["68"] Fan_mode
+    -- command_class ["68"] Fan_mode
     local tstat = classes["64"][1]
     upnp_file, name = add_updater (tstat)
+    local ops = classes["66"]  -- operating state
+      if ops then
+        add_updater(ops[1])
+      end
+    local fst = classes["69"]  -- fan state
+    if fst then
+      add_updater(fst[1])
+    end
     local fmode = classes["68"]
     if fmode then
       add_updater(fmode[1])              -- TODO: extra fan modes
@@ -1161,10 +1189,6 @@ local function configureDevice (id, name, ldv, updaters, child)
     name = v.metrics.title
     -- updaters are set at the end of this if-then-elseif statement
 
---  elseif classes["37"] and #classes["37"] == classes.n then   -- just a bank of switches
---    name = classes["37"][1].metrics.title
---    -- how to handle multiple switches ???
-
   elseif classes["102"] and #classes["102"] == 1 then         -- door lock (barrier)
     local v = classes["102"][1]
     upnp_file, name = add_updater (v)
@@ -1195,9 +1219,10 @@ local function configureDevice (id, name, ldv, updaters, child)
     end
     for _, v in ipairs (classes["113"] or {}) do    -- add motion sensors
       if v.meta.sub_class ~= "3" and v.meta.scale ~= "8" then         -- not a tamper switch or low battery notification
-        v.meta.upnp_file = DEV.motion
-        types["Alarm"] = (types["Alarm"] or 0) + 1
-        child[v.meta.altid] = true                            -- force child creation
+          v.meta.upnp_file = DEV.motion
+          types["Alarm"] = (types["Alarm"] or 0) + 1
+          child[v.meta.altid] = true        -- force child creation
+        end
       end
     end
     local display = {}
@@ -1277,17 +1302,6 @@ local function createChildren (bridgeDevNo, vDevs, room, OFFSET)
     end
     return id
   end
-
-   --[[
-
-           -- update device name and location, if required
-   --        if altid == zDev.id
-   --        and inst.metrics.title ~= zDev.description then
-   --          log (table.concat {"renaming device, old --> new: ", zDev.description, " --> ", inst.metrics.title})
-   --          zDev: rename (inst.metrics.title)
-   --        end
-
-   --]]
 
   local function checkDeviceExists (parent, id, name, altid, upnp_file, json_file, room)
     local dev = luup.devices[id]
@@ -1496,7 +1510,9 @@ local function ZWayVDev_API (ip, sid)
 end
 
 
--- ACTION Login
+-- Specific ACTIONS
+--
+--Login
 function _G.Login (p)
   debug (json.encode(p))
   local j = Z.authenticate (p.Username, p.Password)
@@ -1506,6 +1522,14 @@ function _G.Login (p)
   end
 end
 
+--SendData
+function SendData (p)
+  debug (json.encode(p))
+  local node, data = p.Node, p.Data
+  if node and data then
+    Z.zwsend (node, data)
+  end
+end
 
 -----------------------------------------
 --
