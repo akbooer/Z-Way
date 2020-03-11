@@ -90,6 +90,7 @@ local SID = {          -- schema implementation or shorthand name ==> serviceId
 
     switch      = "urn:upnp-org:serviceId:SwitchPower1",
     dimmer      = "urn:upnp-org:serviceId:Dimming1",
+    doorlock    = "urn:micasaverde-com:serviceId:DoorLock1",
 
     setpoint      = "urn:upnp-org:serviceId:TemperatureSetpoint1",
     setpointHeat  = "urn:upnp-org:serviceId:TemperatureSetpoint1_Heat",
@@ -160,6 +161,11 @@ local function open_or_close (x)
   return y[x] or x
 end
 
+local function rev_open_or_close (x)
+  local y = {["open"] = "1", ["close"] = "0", ["1"] = "open", ["0"] = "close"}
+  return y[x] or x
+end
+
 -- make either "1" or "true" work the same way
 local function is_true (flag)
   local logical_true = {["true"] = true, ["1"] = true}
@@ -205,7 +211,6 @@ local Application  = {
   end,
 }
 
-
 ----------------------------------------------------
 --
 -- SERVICE SCHEMAS - virtual services
@@ -224,55 +229,58 @@ local NIaltid = "^%d+%-%d+$"      -- altid of just node-instance format (ie. not
 
 local S_SwitchPower = {
 
-  ---------------
-  -- 2020.03.02   thanks to @rafale77 for extensive testing and code changes
-  --
-  SetTarget = function (d, args)
-    local level = tostring(args.newTargetValue or 0)
-    local off = level == '0'
-    local class ="-37"
+    ---------------
+    -- 2020.03.02  thanks to @rafale77 for extensive testing and code changes
+    --
+    SetTarget = function (d, args)
+      local level = tostring(args.newTargetValue or 0)
+      local off = level == '0'
+      local class ="-37"
 
-    luup.variable_set (SID.switch, "Target", off and '0' or '1', d)
-    local dimmer = luup.variable_get(SID.dimmer, "LoadLevelTarget",d)  -- check for dimmer
-    if dimmer then
-      class = "-38"
-      if ZERODIMMER then
-        luup.variable_set (SID.dimmer, "LoadLevelTarget", off and '0' or dimmer, d)
+      luup.variable_set (SID.switch, "Target", off and '0' or '1', d)
+      local dimmer = luup.variable_get(SID.dimmer, "OnEffectLevel",d)  -- check for dimmer
+      if dimmer then
+        class =  "-38"
+        if ZERODIMMER then
+          luup.variable_set (SID.dimmer, "LoadLevelTarget", off and '0' or dimmer, d)
+        end
       end
-      if off then
-        luup.variable_set(SID.dimmer, "LoadLevelLast", dimmer, d)
-      else
-      local lastdim = luup.variable_get(SID.dimmer, "LoadLevelLast",d)
-      end
-      luup.variable_set (SID.dimmer, "LoadLevelTarget", off and '0' or lastdim, d)
-    end
-    local altid = luup.devices[d].id
-    altid = altid: match (NIaltid) and altid..class or altid
-    local value = on_or_off (args.newTargetValue)
-    Z.command (altid, value)
-  end,
+      local value = on_or_off (level)
 
-}
+      local gdo = luup.variable_get(SID.doorlock, "Status",d) -- check garage door
+      if gdo then
+        class = "-102"
+        value = rev_open_or_close(level)
+      end
+
+      local altid = luup.devices[d].id
+      altid = altid: match (NIaltid) and altid..class or altid
+      Z.command (altid, value)
+    end,
+
+  }
 
 
 local S_Dimming = {
 
-  ---------------
-  -- 2020.03.02   thanks to @rafale77 for extensive testing and code changes
-  --
-  SetLoadLevelTarget = function (d, args)
-    local level = tostring (args.newLoadlevelTarget or 0)
-    local off = level == '0'
-    local class = "-38"
+    ---------------
+    -- 2020.03.02   thanks to @rafale77 for extensive testing and code changes
+    --
+    SetLoadLevelTarget = function (d, args)
+      local level = tostring (args.newLoadlevelTarget or 0)
+      local off = level == '0'
+      local class = "-38"
+      luup.variable_set (SID.switch, "Target", off and '0' or '1', d)
+      luup.variable_set (SID.dimmer, "OnEffectLevel", level, d)
+      luup.variable_set (SID.dimmer, "LoadLevelTarget", level, d)
 
-    luup.variable_set (SID.switch, "Target", off and '0' or '1', d)
-    luup.variable_set (SID.dimmer, "LoadLevelTarget", level, d)
-    if not off then luup.variable_set (SID.dimmer, "LoadLevelLast", level, d) end
-    local altid = luup.devices[d].id
-    altid = altid: match (NIaltid) and altid..class or altid
-    local value = "exact?level=" .. level
-    Z.command (altid, value)
-  end,
+      local altid = luup.devices[d].id
+      altid = altid: match (NIaltid) and altid..class or altid
+      local value = "exact?level=" .. level
+      Z.command (altid, value)
+      local dv = d.."-"..level
+
+    end,
 
   }
 
@@ -285,6 +293,13 @@ local S_HaDevice = {
       S_SwitchPower.SetTarget (d, {newTargetValue = toggle [status] or '0'})
     end,
 
+    Poll = function (d)
+      local cc = 32
+      local cmd = "Get()"
+      local altid = luup.devices[d].id
+      local id, inst = altid: match "^(%d+)%-(%d+)$"
+      Z.zwcommand(id, inst, cc, cmd)
+    end,
   }
 
 
@@ -708,7 +723,8 @@ local command_class = {
 
   -- barrier operator (eg. garage door)
   ["102"] = function (d, inst)
-      setVar ("Status",open_or_close (inst.metrics.level), SID[S_DoorLock], d)
+      setVar ("Status", rev_open_or_close (inst.metrics.level), SID[S_DoorLock], d)
+      setVar ("Status", rev_open_or_close(inst.metrics.level), SID[S_SwitchPower], d) -- correct readback for garage door
   end,
 
   -- battery
@@ -1167,8 +1183,10 @@ local function configureDevice (id, name, ldv, updaters, child)
     local types = {}
     for _, v in ipairs (classes["49"]) do
       local scale = v.meta.devtype
-      types[scale] = (types[scale] or 0) + 1
-      child[v.meta.altid] = true                            -- force child creation
+      if scale then
+        types[scale] = (types[scale] or 0) + 1
+        child[v.meta.altid] = true                            -- force child creation
+      end
     end
     for _, v in ipairs (classes["48"] or {}) do    -- add motion sensors
       v.meta.upnp_file = DEV.motion
@@ -1367,6 +1385,7 @@ local function ZWayVDev_DUMMY_API (filename)
       request = function () end,
       command = function () end,
       devices = function () return D end,
+      status  = function () return {data = "OK"} end,
     }
   end
 end
