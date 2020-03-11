@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 ABOUT = {
   NAME          = "L_ZWay2",
-  VERSION       = "2020.03.11",
+  VERSION       = "2020.03.11b",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2020 AKBooer",
@@ -39,7 +39,7 @@ ABOUT = {
 -- 2020.02.26  change node numbering scheme
 -- 2020.03.02  significant improvements to dimmer handling thanks to @rafale77
 -- ...         sundry iterations on GitHub
--- 2020.03.11  add SendData action (thanks @DesT)
+-- 2020.03.11  add SendData action (thanks @DesT), fix nil setpoint serviceId
 
 
 -----------------
@@ -321,7 +321,7 @@ local S_Temperature = {
 local S_Security = {
 
     SetArmed = function (d, args)
-      luup.variable_set (args.serviceId, "Armed", args.newArmedValue or '0', d)
+      luup.variable_set (SID[S_Security], "Armed", args.newArmedValue or '0', d)
     end,
 
   }
@@ -426,7 +426,7 @@ local S_HVAC_FanMode = {
     local altid = luup.devices[d].id
     local id, inst = altid: match "^(%d+)%-(%d+)$"
     local cc = 68     --command class
-    local sid = args.serviceId
+    local sid = SID[S_HVAC_FanMode]
     local VtoZ = {Auto = "Set(1,0)", ContinuousOn = "Set(1,1)", PeriodicOn = "Set(1,0)"}
     local cmd = VtoZ[value]
     if cmd then
@@ -472,7 +472,7 @@ local S_HVAC_UserMode = {
     local altid = luup.devices[d].id
     local id, inst = altid: match "^(%d+)%-(%d+)$"
     local cc = 64     --command class
-    local sid = args.serviceId
+    local sid = SID[S_HVAC_UserMode]
     if valid[value] then
       local VtoZ = {Off = "Set(0)", HeatOn = "Set(1)", CoolOn = "Set(2)", AutoChangeOver = "Set(3)"}
       local cmd = VtoZ[value]
@@ -515,6 +515,25 @@ urn:upnp-org:serviceId:FanSpeed1,DirectionStatus=0
 SID[S_HVAC_FanSpeed] = "urn:upnp-org:serviceId:FanSpeed1"
 
 
+local function SetCurrentSetpoint (sid, d, args)
+  local level = args.NewCurrentSetpoint
+  if level then
+    luup.variable_set (sid, "CurrentSetpoint", level, d)
+    local value = "exact?level=" .. level
+    local altid = luup.devices[d].id
+    altid = altid: match (NIaltid)
+    if altid then
+      local suffix = {
+        [SID.setpoint]      = "-67",
+        [SID.setpointHeat]  = "-67-1",
+        [SID.setpointCool]  = "-67-2",
+      }
+      altid = altid .. (suffix[sid] or '')
+      Z.command (altid, value)
+    end
+  end
+end
+
 local S_TemperatureSetpoint = {
 
     GetApplication = Application.get,
@@ -526,26 +545,10 @@ local S_TemperatureSetpoint = {
     GetName = Name.get,
     SetName = Name.set,
 
-    SetCurrentSetpoint = function (d, args)
-      local level = args.NewCurrentSetpoint
-      if level then
-        local sid = args.serviceId
-        luup.variable_set (sid, "CurrentSetpoint", level, d)
-        local value = "exact?level=" .. level
-        local altid = luup.devices[d].id
-        altid = altid: match (NIaltid)
-        if altid then
-          local suffix = {
-            [SID.setpoint]      = "-67",
-            [SID.setpointHeat]  = "-67-1",
-            [SID.setpointCool]  = "-67-2",
-          }
-          altid = altid .. (suffix[args.serviceId] or '')
-          Z.command (altid, value)
-        end
-      end
-    end,
-
+    SetCurrentSetpoint = function (...) 
+      return SetCurrentSetpoint (SID[S_TemperatureSetpoint], ...) 
+    end
+    
 }
 
 local function shallow_copy (x)
@@ -556,7 +559,16 @@ end
 
 -- these copies MUST be separate tables, since they're used to index the SID table
 local S_TemperatureSetpointHeat = shallow_copy (S_TemperatureSetpoint)
+
+S_TemperatureSetpointHeat.SetCurrentSetpoint = function (...) 
+  return SetCurrentSetpoint (SID[S_TemperatureSetpointHeat], ...) 
+end
+
 local S_TemperatureSetpointCool = shallow_copy (S_TemperatureSetpoint)
+S_TemperatureSetpointCool.SetCurrentSetpoint = function (...) 
+  return SetCurrentSetpoint (SID[S_TemperatureSetpointCool], ...) 
+end
+
 
 SID [S_TemperatureSetpoint]         = SID.setpoint
 SID [S_TemperatureSetpointHeat]     = SID.setpointHeat
