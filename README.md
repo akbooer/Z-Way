@@ -1,7 +1,7 @@
 # Z-Way
 Zway plugin for openLuup 
 
-Why Migrate?
+Why Migrate? If you are reading this, you probably already know but just in case...
 
 Because Z-way is a far more stable platform than the vera especially on larger networks. The vera current state has such fundamental design flaws that it is nearly unuseable for any network above ~40 devices. It becomes too chatty and error prone.
 Even on smaller networks, the notoriously absurd abuse of luup reloads and forced deletion and creation of devices has turned away mor than one customer.
