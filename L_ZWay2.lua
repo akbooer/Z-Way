@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 ABOUT = {
   NAME          = "L_ZWay2",
-  VERSION       = "2020.03.11b",
+  VERSION       = "2020.03.12",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2020 AKBooer",
@@ -686,12 +686,16 @@ local command_class = {
   ["50"] = function (d, inst, meta)
     local var = (inst.metrics.scaleTitle or '?'): upper ()
     local translate = {W = "Watts", A = "Amps", V = "Volts"}      -- 2020.02.10 thanks @rafale77
-    if var then setVar (translate[var] or var, inst.metrics.level, meta.service, d) end
+    if var then
+      setVar (translate[var] or var, inst.metrics.level, meta.service, d)
+      setVar ("KWHReading", inst.updateTime, meta.service, d)
+    end
   end,
 
   -- door lock
   ["98"] = function (d, inst)
       setVar ("Status",open_or_close (inst.metrics.level), SID[S_DoorLock], d)
+      setVar ("LastTrip", inst.updateTime, SID[S_Security], d)
   end,
 
   -- thermostat
