@@ -96,9 +96,9 @@ local DEV = setmetatable ({
 
 
 local KnownSID = {          -- list of all implemented serviceIds
-  
+
     "urn:akbooer-com:serviceId:ZWay1",
-    
+
     "urn:micasaverde-com:serviceId:Camera1",
     "urn:micasaverde-com:serviceId:Color1",
     "urn:micasaverde-com:serviceId:ComboDevice1",
@@ -114,7 +114,7 @@ local KnownSID = {          -- list of all implemented serviceIds
     "urn:micasaverde-com:serviceId:SecuritySensor1",
     "urn:micasaverde-com:serviceId:WindowCovering1",
     "urn:micasaverde-com:serviceId:ZWaveNetwork1",
-    
+
     "urn:upnp-org:serviceId:Dimming1",
     "urn:upnp-org:serviceId:FanSpeed1",
     "urn:upnp-org:serviceId:HVAC_FanOperatingMode1",
@@ -289,7 +289,7 @@ SRV.Dimming = {
       local level = tostring (args.newLoadlevelTarget or 0)
       local off = level == '0'
       local class = "-38"
-      
+
       luup.variable_set (SID.SwitchPower, "Target", off and '0' or '1', d)
       luup.variable_set (SID.Dimming, "OnEffectLevel", level, d)
       luup.variable_set (SID.Dimming, "LoadLevelTarget", level, d)
@@ -322,9 +322,9 @@ SRV.HaDevice = {
 
 
 SRV.TemperatureSensor = {
-    
+
     GetCurrentTemperature = {returns = {CurrentTemp = "CurrentTemperature"}},
-  
+
   }
 
 
@@ -540,10 +540,10 @@ SRV.TemperatureSetpoint = {
     GetCurrentSetpoint  = {returns = {CurrentSP  = "CurrentSetpoint"}},
     GetSetpointAchieved = {returns = {CurrentSPA = "SetpointAchieved"}},
 
-    SetCurrentSetpoint = function (...) 
-      return SetCurrentSetpoint (SID.TemperatureSetpoint, ...) 
+    SetCurrentSetpoint = function (...)
+      return SetCurrentSetpoint (SID.TemperatureSetpoint, ...)
     end
-    
+
 }
 
 local function shallow_copy (x)
@@ -555,14 +555,14 @@ end
 -- these copies MUST be separate tables, since they're used to index the SID table
 SRV.TemperatureSetpoint1_Heat = shallow_copy (SRV.TemperatureSetpoint)
 
-SRV.TemperatureSetpoint1_Heat.SetCurrentSetpoint = function (...) 
-  return SetCurrentSetpoint (SID.TemperatureSetpointHeat, ...) 
+SRV.TemperatureSetpoint1_Heat.SetCurrentSetpoint = function (...)
+  return SetCurrentSetpoint (SID.TemperatureSetpoint1_Heat, ...)
 end
 
 SRV.TemperatureSetpoint1_Cool = shallow_copy (SRV.TemperatureSetpoint)
 
-SRV.TemperatureSetpoint1_Cool.SetCurrentSetpoint = function (...) 
-  return SetCurrentSetpoint (SID.TemperatureSetpointCool, ...) 
+SRV.TemperatureSetpoint1_Cool.SetCurrentSetpoint = function (...)
+  return SetCurrentSetpoint (SID.TemperatureSetpoint1_Cool, ...)
 end
 
 
@@ -644,12 +644,16 @@ local command_class = {
   ["50"] = function (d, inst, meta)
     local var = (inst.metrics.scaleTitle or '?'): upper ()
     local translate = {W = "Watts", A = "Amps", V = "Volts"}      -- 2020.02.10 thanks @rafale77
-    if var then setVar (translate[var] or var, inst.metrics.level, meta.service, d) end
+    if var then
+    setVar (translate[var] or var, inst.metrics.level, meta.service, d)
+    setVar ("KWHReading", inst.updateTime, meta.service, d)
+    end
   end,
 
   -- door lock
   ["98"] = function (d, inst)
       setVar ("Status",open_or_close (inst.metrics.level), SID.DoorLock, d)
+      setVar ("LastTrip", inst.updateTime, SID.SecuritySensor, d)
   end,
 
   -- thermostat
@@ -881,7 +885,7 @@ SensorMultilevel
   ["98"] = { "D_DoorLock1.xml",   SID.DoorLock },
 
   ["102"] = { "D_BinaryLight1.xml",  SID.SwitchPower, "D_GarageDoor_Linear.json" },    -- "Barrier Operator"
-  ["113"] = { "D_DoorSensor1.xml", SID.SecuritySensor, "D_DoorSensor1.json",    -- "Alarm Notifications" 
+  ["113"] = { "D_DoorSensor1.xml", SID.SecuritySensor, "D_DoorSensor1.json",    -- "Alarm Notifications"
      scale = {
 --  1	"Smoke"
 --	2	"CO"     -- "D_SmokeSensor1.xml"
@@ -1462,7 +1466,7 @@ end
 function SendData (p)
   debug (json.encode(p))
   local node, data = p.Node, p.Data
-  if node and data then 
+  if node and data then
     Z.zwsend (node, data)
   end
 end
@@ -1550,7 +1554,7 @@ function init(devNo)
     setVar ("DisplayLine1", 'Login required', SID.AltUI)
     status, comment = false, "Failed to authenticate"
   end
-  
+
   return status, comment, ABOUT.NAME
 
 end
