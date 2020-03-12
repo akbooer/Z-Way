@@ -1,16 +1,17 @@
-# Z-Way
-Zway plugin for openLuup 
+# Z-Way for OpenLuup
+Zway introduction as a replacement for vera
 
 Why Migrate? If you are reading this, you probably already know but just in case...
 
 Because Z-way is a far more stable platform than the vera especially on larger networks. The vera current state has such fundamental design flaws that it is nearly unuseable for any network above ~40 devices. It becomes too chatty and error prone.
-Even on smaller networks, the notoriously absurd abuse of luup reloads and forced deletion and creation of devices has turned away mor than one customer.
+Even on smaller networks, the notoriously absurd abuse of luup reloads and forced deletion and creation of devices has turned away more than one customer.
+A quick visit on the vera forum will get you a flavor of the issues plaguing this platform ranging from device bricking, poor storage management using tiny portion of what the hardware provides, ghost sensor trips, memory corruption, memory leaks... All of which I have experienced.
 
 Z-way-server on the other hand is built on a much more stable and solid API and zwave library. The "Expert UI" can pretty much support any device which has nothing propriatory. It's smarthome UI, which API this plugin relies on however has its flaws, filtering out useful command classes and requiring some workaround to address the lower level API.
 
 Assuming that the entire automation setup (scenes and plugins) have already been migrated to openLuup, you can now migrate the zwave hub and take advantage of the best part of the vera, it's object data structure, API and lua/plugins, and get rid of its instability.
 
-# Guide to migrate from Vera as a zwave device hub to Z-way:
+# Guide to migrate from Vera as a zwave device hub to Z-way
 
 There are many ways to migrate a zwave network. 
 One way to initially run testing is just to add the z-way as a secondary controller to your network. Normally, the inclusion process of z-way involves a security key exchange which the vera often fails so you may need a few retries. At some point though when ready to let go of the vera, a different method will be required to give z-way the zwave primary role.
@@ -38,8 +39,17 @@ If you previously succesfully included or shifted the z-way into the vera's netw
 
 C. Configure Z-way
 
-Move the uzb to your z-way-server machine and start z-way. Make sure that the zwave app has your uzb as its dongle device. Again it should be /dev/ttyACM0 if you are on a linux machine. You could also keep the uzb in the vera, nuke the vera software and forward the uzb serial port over IP to a virtual machine containing the z-wave-me server. This is a topic for another chapter.
+Move the uzb to your z-way-server machine and start z-way. Make sure that the zwave app has your uzb as its dongle device. Again it should be /dev/ttyACM0 if you are on a linux machine. You could also keep the uzb in the vera, nuke the vera software and forward the uzb serial port over IP to a virtual machine containing the z-wave-me server. This is a topic for another chapter. Make sure to have the Z-way credentials handy and to enable the Zwave API from the Z-way apps/Z-Wave Network Access menu. (tick every checkbox and save)
 Once zway is up and running, go to the Expert UI and send a "NIF" (Node Information Frame) in the controller menu to every node. You may need to wakeup the sleepy nodes to interview them. Some devices may need a configuration change to work with z-way vs. vera. Ask on the forum if you run into something like this and can't figure it out. As devices get interviewed, their configurations get populated and virtual devices will show up in zway's Smarthome UI. You should not need to worry about associations since you cloned the controller's ID. For more information on interviews, consult the z-way manual.
 
+Once this is done, you may want to rename all of the devices on the smartHome UI through recognizing them by their node IDs. Create rooms and assign the devices to the same room they were on the vera. Make sure that the room names are the same down to capitalization. This will make things easier for the next step.
+
 D. Install the Z-way2 Bridge
+
+It is as simple as downloading the files in this repo, drop them in your openLuup plugin folder (normally /etc/cmh-ludl) and create a new device using D_ZWay.xml and I_Zway2.xml as the device and implementation files respectively. Alternatively, it can be installed through openLuup's AltAppStore.
+After installation, you will need to provide the z-way IP and credentials. For local installations on the same machine as openLuup, you can use "127.0.0.1" as the localhost IP. You will have to enter the credentials through openLuup's console.
+Enable the CloneRooms feature by setting the variable to "1" in the plugin's device variable list and reload luup.
+Tada! Upon luup reload, the zway devices will be populated on openluup in the same rooms as you set them on zway and also with the same names. Because zway does not use the same device library as vera and openLuup is does, some devices may have the wrong device types. You may need to go change the device file and device json for some of the devices but the rest should work from here.
+
+
 
