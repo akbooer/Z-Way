@@ -316,12 +316,10 @@ local S_Temperature = {
 
    }
 
-
-  --
 local S_Security = {
 
     SetArmed = function (d, args)
-      luup.variable_set ("urn:micasaverde-com:serviceId:SecuritySensor1", "Armed", args.newArmedValue or '0', d)
+      luup.variable_set (args.serviceId, "Armed", args.newArmedValue , d)
     end,
 
   }
@@ -426,7 +424,7 @@ local S_HVAC_FanMode = {
     local altid = luup.devices[d].id
     local id, inst = altid: match "^(%d+)%-(%d+)$"
     local cc = 68     --command class
-    local sid = "urn:upnp-org:serviceId:HVAC_FanOperatingMode1"
+    local sid = args.serviceId                --"urn:upnp-org:serviceId:HVAC_FanOperatingMode1"
     local VtoZ = {Auto = "Set(1,0)", ContinuousOn = "Set(1,1)", PeriodicOn = "Set(1,0)"}
     local cmd = VtoZ[value]
     if cmd then
