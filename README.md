@@ -51,5 +51,16 @@ After installation, you will need to provide the z-way IP and credentials. For l
 Enable the CloneRooms feature by setting the variable to "1" in the plugin's device variable list and reload luup.
 Tada! Upon luup reload, the zway devices will be populated on openluup in the same rooms as you set them on zway and also with the same names. Because zway does not use the same device library as vera and openLuup is does, some devices may have the wrong device types. You may need to go change the device file and device json for some of the devices but the rest should work from here.
 
+E. Hardware Options
 
+Z-way comes in two different hardware versions: 
+   The Razberry which is a raspberry Pi with a zwave daughter board
+   The uzb which is a silabs SD3102 USB dongle with a proprietary bootloader enabling it to keep a license key, manage the LED amoungst other things.
 
+At the time of writting the razberry version of z-way 3.0.x is suffering from a bug causing it to shutdown under heavy http request load. I have not observed this on my ubuntu version.
+
+Location of the zwave controller is crucial to the functionning of the network and therefore one will want to position it at a central location in the house. ith either of these two solutions, you have the possibility of locating the zwave device at one location and then forward its serial signal to another location, for example a server or a virtual machine on a computer which is on 24/7. Since you are running openluup, the recommendation would be to run z-way on the same machine as openluup no matter what it is as z-way is available on many platforms from windows to linux on arm64, arm32, to x64 an x32.
+These are some guides to use ser2net to forward the serial port from one machine and receive it on the host computer with socat:
+
+https://community.openhab.org/t/share-z-wave-dongle-over-ip-usb-over-ip-using-ser2net-socat-guide/34895
+https://community.home-assistant.io/t/using-a-vera-edge-as-a-network-attached-zwave-device-skipping-the-vera-software/30607
