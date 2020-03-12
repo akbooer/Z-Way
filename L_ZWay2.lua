@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 ABOUT = {
   NAME          = "L_ZWay2",
-  VERSION       = "2020.03.11b",
+  VERSION       = "2020.03.12",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2020 AKBooer",
@@ -272,7 +272,7 @@ local S_Dimming = {
       local level = tostring (args.newLoadlevelTarget or 0)
       local off = level == '0'
       local class = "-38"
-      
+
       luup.variable_set (SID.switch, "Target", off and '0' or '1', d)
       luup.variable_set (SID.dimmer, "OnEffectLevel", level, d)
       luup.variable_set (SID.dimmer, "LoadLevelTarget", level, d)
@@ -316,12 +316,10 @@ local S_Temperature = {
 
    }
 
-
-  --
 local S_Security = {
 
     SetArmed = function (d, args)
-      luup.variable_set (SID[S_Security], "Armed", args.newArmedValue or '0', d)
+      luup.variable_set (args.serviceId, "Armed", args.newArmedValue , d)
     end,
 
   }
@@ -426,7 +424,7 @@ local S_HVAC_FanMode = {
     local altid = luup.devices[d].id
     local id, inst = altid: match "^(%d+)%-(%d+)$"
     local cc = 68     --command class
-    local sid = SID[S_HVAC_FanMode]
+    local sid = args.serviceId                --"urn:upnp-org:serviceId:HVAC_FanOperatingMode1"
     local VtoZ = {Auto = "Set(1,0)", ContinuousOn = "Set(1,1)", PeriodicOn = "Set(1,0)"}
     local cmd = VtoZ[value]
     if cmd then
@@ -448,8 +446,6 @@ SID[S_HVAC_FanMode] = "urn:upnp-org:serviceId:HVAC_FanOperatingMode1"
 
 local S_HVAC_State = { --[[
 --["66"] Operating_state
---  ["67"]  -- Setpoint
-        --Setpoint
         --	Heating,Cooling,Furnace,Dry Air,Moist Air,Auto Change Over,Energy Save Heating,Energy Save Cooling,Away Heating,Away Cooling,Full Power
 urn:micasaverde-com:serviceId:HVAC_OperatingState1,ModeState=Off
 
@@ -472,7 +468,7 @@ local S_HVAC_UserMode = {
     local altid = luup.devices[d].id
     local id, inst = altid: match "^(%d+)%-(%d+)$"
     local cc = 64     --command class
-    local sid = SID[S_HVAC_UserMode]
+    local sid = args.serviceId
     if valid[value] then
       local VtoZ = {Off = "Set(0)", HeatOn = "Set(1)", CoolOn = "Set(2)", AutoChangeOver = "Set(3)"}
       local cmd = VtoZ[value]
@@ -545,10 +541,10 @@ local S_TemperatureSetpoint = {
     GetName = Name.get,
     SetName = Name.set,
 
-    SetCurrentSetpoint = function (...) 
-      return SetCurrentSetpoint (SID[S_TemperatureSetpoint], ...) 
+    SetCurrentSetpoint = function (...)
+      return SetCurrentSetpoint (SID[S_TemperatureSetpoint], ...)
     end
-    
+
 }
 
 local function shallow_copy (x)
@@ -560,13 +556,13 @@ end
 -- these copies MUST be separate tables, since they're used to index the SID table
 local S_TemperatureSetpointHeat = shallow_copy (S_TemperatureSetpoint)
 
-S_TemperatureSetpointHeat.SetCurrentSetpoint = function (...) 
-  return SetCurrentSetpoint (SID[S_TemperatureSetpointHeat], ...) 
+S_TemperatureSetpointHeat.SetCurrentSetpoint = function (...)
+  return SetCurrentSetpoint (SID[S_TemperatureSetpointHeat], ...)
 end
 
 local S_TemperatureSetpointCool = shallow_copy (S_TemperatureSetpoint)
-S_TemperatureSetpointCool.SetCurrentSetpoint = function (...) 
-  return SetCurrentSetpoint (SID[S_TemperatureSetpointCool], ...) 
+S_TemperatureSetpointCool.SetCurrentSetpoint = function (...)
+  return SetCurrentSetpoint (SID[S_TemperatureSetpointCool], ...)
 end
 
 
@@ -690,12 +686,16 @@ local command_class = {
   ["50"] = function (d, inst, meta)
     local var = (inst.metrics.scaleTitle or '?'): upper ()
     local translate = {W = "Watts", A = "Amps", V = "Volts"}      -- 2020.02.10 thanks @rafale77
-    if var then setVar (translate[var] or var, inst.metrics.level, meta.service, d) end
+    if var then
+      setVar (translate[var] or var, inst.metrics.level, meta.service, d)
+      setVar ("KWHReading", inst.updateTime, meta.service, d)
+    end
   end,
 
   -- door lock
   ["98"] = function (d, inst)
       setVar ("Status",open_or_close (inst.metrics.level), SID[S_DoorLock], d)
+      setVar ("LastTrip", inst.updateTime, SID[S_Security], d)
   end,
 
   -- thermostat
@@ -712,6 +712,10 @@ local command_class = {
   end,
 
   ["66"] = function (d, inst)       -- Operating_state
+     local ZtoV = {["0"] = "Idle", ["1"] = "Heating", ["2"] = "Cooling"}
+     local level = inst.metrics.level
+     sid = "urn:micasaverde-com:serviceId:HVAC_OperatingState1"
+     setVar ("ModeState", ZtoV[level] or level, sid, d)
   end,
 
   ["67"] = function (d, inst, meta)       -- Setpoint
@@ -729,8 +733,12 @@ local command_class = {
     end
   end,
 
-  ["68"] = function (d, inst)       -- ThermostatFanMode
+  ["69"] = function (d, inst)       -- ThermostatFanState
     --	Auto Low,On Low,Auto High,On High,Auto Medium,On Medium,Circulation,Humidity and circulation,Left and right,Up and down,Quite
+    local ZtoV = {["0"] = "Off", ["1"] = "On"}
+    local level = inst.metrics.level
+    sid = "urn:micasaverde-com:serviceId:HVAC_FanOperatingMode1"
+    setVar ("FanStatus", ZtoV[level] or level, sid, d)
   end,
 
 
@@ -1142,6 +1150,14 @@ local function configureDevice (id, name, ldv, updaters, child)
     -- command_class ["68"] Fan_mode
     local tstat = classes["64"][1]
     upnp_file, name = add_updater (tstat)
+    local ops = classes["66"]  -- operating state
+      if ops then
+        add_updater(ops[1])
+      end
+    local fst = classes["69"]  -- fan state
+    if fst then
+      add_updater(fst[1])
+    end
     local fmode = classes["68"]
     if fmode then
       add_updater(fmode[1])              -- TODO: extra fan modes
@@ -1205,9 +1221,9 @@ local function configureDevice (id, name, ldv, updaters, child)
     end
     for _, v in ipairs (classes["113"] or {}) do    -- add motion sensors
       if v.meta.sub_class ~= "3" and v.meta.scale ~= "8" then         -- not a tamper switch or low battery notification
-        v.meta.upnp_file = DEV.motion
-        types["Alarm"] = (types["Alarm"] or 0) + 1
-        child[v.meta.altid] = true                            -- force child creation
+          v.meta.upnp_file = DEV.motion
+          types["Alarm"] = (types["Alarm"] or 0) + 1
+          child[v.meta.altid] = true        -- force child creation
       end
     end
     local display = {}
@@ -1511,7 +1527,7 @@ end
 function SendData (p)
   debug (json.encode(p))
   local node, data = p.Node, p.Data
-  if node and data then 
+  if node and data then
     Z.zwsend (node, data)
   end
 end
