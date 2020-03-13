@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 ABOUT = {
   NAME          = "L_ZWay2",
-  VERSION       = "2020.03.12",
+  VERSION       = "2020.03.13",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2020 AKBooer",
@@ -54,6 +54,8 @@ local chdev   = require "openLuup.chdev"    -- NOT the same as the luup.chdev mo
 local http    = require "socket.http"
 local ltn12   = require "ltn12"
 
+local empty = setmetatable ({}, {__newindex = function() error ("read-only", 2) end})
+
 ------------------
 
 local function _log(text, level)
@@ -73,7 +75,7 @@ local Z         -- the Zway API object
 
 local cclass_update   -- table of command_class updaters indexed by altid
 
-local devNo     -- out device number
+local devNo     -- our device number
 local OFFSET    -- bridge offset for child devices
 local POLLRATE  -- poll rate for Zway devices
 
@@ -176,16 +178,25 @@ local NIaltid = "^(%d+)%-(%d+)$"      -- altid of just node-instance format (ie.
 local function getVar (name, service, device)
   service = service or SID.ZWay
   device = device or devNo
-  local x = luup.variable_get (service, name, device)
+  -- this needs to be fast because it is called for every vDev each update cycle
+  -- use openLuup objects, rather than slower luup.variable_get() function call
+  -- local x = luup.variable_get (service, name, device)
+  local dev, srv, var, x
+  dev = luup.devices[tonumber(device)]
+  srv = dev.services[service]
+  if srv then var = srv.variables[name] end
+  if var then x = var.value end
   return x
 end
 
 local function setVar (name, value, service, device)
   service = service or SID.ZWay
   device = device or devNo
-  local old = luup.variable_get (service, name, device)
+  -- use getVar(), above, rather than slower luup.variable_get () function call
+  -- local old = luup.variable_get (service, name, device)
+  local old = getVar (name, service, device)
   if tostring(value) ~= old then
-   luup.variable_set (service, name, value, device)
+   luup.variable_set (service, name, value, device)  -- no option here, because of logging, etc.
   end
 end
 
@@ -556,13 +567,13 @@ end
 SRV.TemperatureSetpoint1_Heat = shallow_copy (SRV.TemperatureSetpoint)
 
 SRV.TemperatureSetpoint1_Heat.SetCurrentSetpoint = function (...) 
-  return SetCurrentSetpoint (SID.TemperatureSetpointHeat, ...) 
+  return SetCurrentSetpoint (SID.TemperatureSetpoint1_Heat, ...) 
 end
 
 SRV.TemperatureSetpoint1_Cool = shallow_copy (SRV.TemperatureSetpoint)
 
 SRV.TemperatureSetpoint1_Cool.SetCurrentSetpoint = function (...) 
-  return SetCurrentSetpoint (SID.TemperatureSetpointCool, ...) 
+  return SetCurrentSetpoint (SID.TemperatureSetpoint1_Cool, ...) 
 end
 
 
@@ -584,14 +595,10 @@ local command_class = {
       if click ~= meta.click then -- force variable updates
         local scene = meta.scale
         local time  = os.time()     -- "◷" == json.decode [["\u25F7"]]
---        local date  = os.date ("◷ %Y-%m-%d %H:%M:%S", time): gsub ("^0",'')
 
         luup.variable_set (SID.SceneController, "sl_SceneActivated", scene, d)
         luup.variable_set (SID.SceneController, "LastSceneTime",time, d)
-
---        if time then luup.variable_set (SID.AltUI, "DisplayLine1", date,  d) end
---        luup.variable_set (SID.AltUI, "DisplayLine2", "Last Scene: " .. scene, d)
-
+        
         meta.click = click
       end
 
@@ -725,12 +732,6 @@ local D = {}    -- device structure simply for the HTTP callback diagnostic
 
 function _G.updateChildren (d)
   D = d or Z.devices () or {}
---    else
---    luup.set_failure (2, devNo)	        -- authorisation failure
---    setVar ("DisplayLine1", 'Login required', SID.AltUI)
---    status, comment = false, "Failed to authenticate"
---  end
-
   for _,inst in pairs (D) do
     local altid, vtype, node, instance = NICS_etc (inst)
     if node then
@@ -741,6 +742,7 @@ function _G.updateChildren (d)
         local id = vtype .. altid
         setVar (id, inst.metrics.level, SID.ZWay, zDevNo)
         setVar (id .. "_LastUpdate", inst.updateTime, SID.ZWay, zDevNo)
+        setVar ("CommFailure", inst.metrics.isFailed, SID.HaDevice, zDevNo)
 
         local update = cclass_update [altid]
         if update then update (inst) end
@@ -921,8 +923,9 @@ instance = {
       level = 9,
       probeTitle = "Luminiscence",
       scaleTitle = "Lux",
-      title = "Aeon Labs Luminiscence (9.0.49.3)"
-    },
+      title = "Aeon Labs Luminiscence (9.0.49.3)",
+      isFailed =	false,
+},
     permanently_hidden = false,
     probeType = "luminosity",
     tags = {},
@@ -1308,17 +1311,19 @@ end
 --
 
 local function ZWayVDev_DUMMY_API (filename)
-
+  local function noop() end
   local f = assert (io.open (filename), "TEST filename not found")
   local D = json.decode (f: read "*a")
   f: close()
 
   if D then
     return {
-      request = function () end,
-      command = function () end,
+      request = noop,
+      command = noop,
       devices = function () return D end,
       status  = function () return {data = "OK"} end,
+      zwcommand = noop,
+      zwsend = noop,
     }
   end
 end
@@ -1473,8 +1478,8 @@ end
 -- Z-Way()  STARTUP
 --
 
-function init(devNo)
-	devNo = tonumber(devNo)
+function init (lul_device)
+	devNo = tonumber (lul_device)
 
   do -- version number
     local y,m,d = ABOUT.VERSION:match "(%d+)%D+(%d+)%D+(%d+)"
