@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 ABOUT = {
   NAME          = "L_ZWay2",
-  VERSION       = "2020.03.12c",
+  VERSION       = "2020.03.13",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2020 AKBooer",
@@ -747,7 +747,7 @@ function _G.updateChildren (d)
         local id = vtype .. altid
         setVar (id, inst.metrics.level, SID.ZWay, zDevNo)
         setVar (id .. "_LastUpdate", inst.updateTime, SID.ZWay, zDevNo)
-        setVar ("CommFailure", inst.metrics.isFailed, SID.HaDevice, zDevNo)
+        setVar ("CommFailure", is_true(inst.metrics.isFailed) and 1 or 0, SID.HaDevice, zDevNo)
         local update = cclass_update [altid]
         if update then update (inst) end
       end
