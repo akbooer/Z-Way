@@ -747,7 +747,7 @@ function _G.updateChildren (d)
         local id = vtype .. altid
         setVar (id, inst.metrics.level, SID.ZWay, zDevNo)
         setVar (id .. "_LastUpdate", inst.updateTime, SID.ZWay, zDevNo)
-        setVar ("CommFailure", is_true(inst.metrics.isFailed) and 1 or 0, SID.HaDevice, zDevNo)
+        setVar ("CommFailure", is_true(inst.metrics.isFailed) and '1' or '0', SID.HaDevice, zDevNo)
         local update = cclass_update [altid]
         if update then update (inst) end
       end
