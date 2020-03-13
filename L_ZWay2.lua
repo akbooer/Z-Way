@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 ABOUT = {
   NAME          = "L_ZWay2",
-  VERSION       = "2020.03.12b",
+  VERSION       = "2020.03.12",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2020 AKBooer",
@@ -747,7 +747,7 @@ function _G.updateChildren (d)
         local id = vtype .. altid
         setVar (id, inst.metrics.level, SID.ZWay, zDevNo)
         setVar (id .. "_LastUpdate", inst.updateTime, SID.ZWay, zDevNo)
-
+        setVar ("CommFailure", inst.metrics.isFailed, SID.HaDevice, zDevNo)
         local update = cclass_update [altid]
         if update then update (inst) end
       end
@@ -928,6 +928,7 @@ instance = {
       probeTitle = "Luminiscence",
       scaleTitle = "Lux",
       title = "Aeon Labs Luminiscence (9.0.49.3)"
+      isFailed = false
     },
     permanently_hidden = false,
     probeType = "luminosity",
@@ -957,6 +958,7 @@ local function vDev_meta (v)
     return {
       name      = v.metrics.title,
       level     = v.metrics.level,
+      isFailed    = v.metrics.isFailed,
 
       upnp_file = upnp_file,
       service   = service,
