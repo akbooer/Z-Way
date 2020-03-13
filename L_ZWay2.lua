@@ -223,9 +223,9 @@ local function rev_open_or_close (x)
   return y[x] or x
 end
 
--- make either "1" or "true" work the same way
+-- make either "1" or "true" or true work the same way
 local function is_true (flag)
-  local y = {["true"] = true, ["1"] = true}
+  local y = {["true"] = true, ["1"] = true, [true] = true}
   return y [flag]
 end
 
