@@ -69,7 +69,128 @@ local function debug (info)
   end
 end
 
+-----------------------------------------
+--
+-- Z-WayVDev() API
+--
+
+
+local function ZWayVDev_API (ip, sid)
+
+  local cookie = "ZWAYSession=" .. (sid or '')
+
+  local function HTTP_request (url, body)
+    local response_body = {}
+    local method = body and "POST" or "GET"
+--    local response, status, headers = http.request{
+    local _, status = http.request{
+      method = method,
+      url=url,
+      headers = {
+          ["Content-Length"] = body and #body,
+          ["Cookie"]= cookie,
+        },
+      source = body and ltn12.source.string(body),
+      sink = ltn12.sink.table(response_body)
+    }
+    local json_response = table.concat (response_body)
+    if status ~= 200 then
+      _log (url)
+      _log (json_response)
+    end
+    return status, json_response
+  end
+
+  local function HTTP_request_json (url, body)
+    local  status, json_response = HTTP_request (url, body)
+    return status, json.decode (json_response)
+  end
+
+  local function authenticate (user, password)
+    local url = "http://%s:8083/ZAutomation/api/v1/login"
+    local data = json.encode {login=user, password = password}
+    local _, j = HTTP_request_json (url: format (ip), data)
+    local sid = j and j.data and j.data.sid
+    cookie = sid and "ZWAYSession=" .. sid or nil   -- invalidate old one, whatever
+    return sid, j
+  end
+
+  local function devices ()
+    local url = "http://%s:8083/ZAutomation/api/v1/devices"
+    local _, d = HTTP_request_json (url: format (ip))
+    return d and d.data and d.data.devices or empty
+  end
+
+  -- send a command
+  local function command (id, cmd)
+    local url = "http://%s:8083/ZAutomation/api/v1/devices/ZWayVDev_zway_%s/command/%s"
+    local request = url: format (ip, id, cmd)
+    return HTTP_request_json (request)
+  end
+
+  -- send a zwave command
+  local function zwcommand (id, inst, cc, cmd)
+    local url = "http://%s:8083/ZWaveAPI/Run/devices[%s].instances[%s].commandClasses[%s].%s"
+    local request = url: format (ip, id, inst, cc, cmd)
+    return HTTP_request_json (request)
+  end
+
+  -- send a data packet
+  local function zwsend (id, data)
+    local url = "http://%s:8083/ZWaveAPI/Run/SendData(%s,%s)"
+    local request = url: format (ip, id, data)
+    return HTTP_request_json (request)
+  end
+
+  -- send a generic request
+  local function request (req)
+    local url = "http://%s:8083%s"
+    local request = url: format (ip, req)
+    return HTTP_request (request)
+  end
+
+  -- return status
+  local function status ()
+    local url = "http://%s:8083/ZAutomation/api/v1/status"
+    local _, d = HTTP_request_json (url: format (ip))
+    return d
+  end
+
+  return {
+    request = request,    -- for low-level access
+    status  = status,
+    command = command,
+    zwcommand = zwcommand,
+    zwsend = zwsend,
+    devices = devices,
+    authenticate = authenticate}
+end
+
+-----------------------------------------
+--
+-- DUMMY Z-WayVDev() API, for testing from file
+--
+
+local function ZWayVDev_DUMMY_API (filename)
+  local function noop() end
+  local f = assert (io.open (filename), "TEST filename not found")
+  local D = json.decode (f: read "*a")
+  f: close()
+
+  if D then
+    return {
+      request = noop,
+      command = noop,
+      devices = function () return D end,
+      status  = function () return {data = "OK"} end,
+      zwcommand = noop,
+      zwsend = noop,
+    }
+  end
+end
+
 ------------------
+
 
 local Z         -- the Zway API object
 
@@ -93,6 +214,10 @@ local DEV = setmetatable ({
     controller  = "D_SceneController1.xml",
     combo       = "D_ComboDevice1.xml",
     rgb         = "D_DimmableRGBLight1.xml",
+  
+  -- D_Siren1.xml
+  -- D_SmokeSensor1.xml
+
   },{
     __index = function (_,n) _log ("ERROR: Unknown DEV: "..(n or '?')) end})
 
@@ -174,11 +299,10 @@ local NIaltid = "^(%d+)%-(%d+)$"      -- altid of just node-instance format (ie.
 
 -- LUUP utility functions
 
-
 local function getVar (name, service, device)
   service = service or SID.ZWay
   device = device or devNo
-  -- this needs to be fast because it is called for every vDev each update cycle
+  -- this needs to be fast because it is called for every vDev each update cycle.
   -- use openLuup objects, rather than slower luup.variable_get() function call
   -- local x = luup.variable_get (service, name, device)
   local dev, srv, var, x
@@ -319,7 +443,9 @@ SRV.HaDevice = {
     ToggleState = function (d)
       local toggle = {['0'] = '1', ['1']= '0'}
       local status = getVar ("Status", SID.SwitchPower, d)
-      SRV.SwitchPower.SetTarget (d, {newTargetValue = toggle [status] or '0'})
+      if status then
+        SRV.SwitchPower.SetTarget (d, {newTargetValue = toggle [status] or '0'})
+      end
     end,
 
     Poll = function (d)
@@ -408,7 +534,7 @@ SRV.SceneControllerLED = {
 
   SetLight = function (d, args)
     local altid = luup.devices[d].id
-    local id, inst = altid: match (NIaltid)
+    local id = altid: match (NIaltid)
     local cc = 145     --command class
     local color = tonumber(args.newValue)
     local indicator = args.Indicator
@@ -582,6 +708,11 @@ end
 -- COMMAND CLASSES - virtual device updates
 --
 
+
+local CC = {}   -- command class object
+
+do -- COMMAND CLASSES
+  
 local command_class = {
 
   -- catch-all
@@ -627,10 +758,9 @@ local command_class = {
     local sid = SID.SecuritySensor
     local tripped = on_or_off (inst.metrics.level)
     local old = getVar ("Tripped", sid)
-    -- 2020.02.15  ArmedTripped now generated by openLuup itself for all security sensor services
+    -- 2020.02.15  LastTrip and ArmedTripped  generated by openLuup itself
     if tripped ~= old then
       setVar ("Tripped", tripped, sid, d)
-      setVar ("LastTrip", inst.updateTime, sid, d)
     end
   end,
 
@@ -656,23 +786,27 @@ local command_class = {
 
   -- door lock
   ["98"] = function (d, inst)
-      setVar ("Status",open_or_close (inst.metrics.level), SID.DoorLock, d)
+    setVar ("Status",open_or_close (inst.metrics.level), SID.DoorLock, d)
   end,
 
   -- thermostat
 
   ["64"] = function (d, inst, meta)       -- ThermostatMode
+    d, inst, meta = d, inst, meta
     -- ZWay modes:
     --	Off,Heat,Cool,Auto,Auxiliary,Resume,Fan Only,Furnace,Dry Air,Moist Air,Auto Change Over,
     --  Energy Save Heat,Energy Save Cool,Away Heat,Away Cool,Full Power,Manufacturer Specific.
     -- Vera modes:
-    --  {Off = true, AutoChangeOver = true, CoolOn = true, HeatOn = true, }
-      local ZtoV = {Off = "Off", Heat = "HeatOn", Cool = "CoolOn", Auto = "AutoChangeOver", ["Auto Change Over"] = "AutoChangeOver"}
-      local level = inst.metrics.level
-    --  setVar ("ModeStatus", ZtoV[level] or level, meta.service, d)
-  end,
+--[[
+    local ZtoV = {Off = "Off", Heat = "HeatOn", Cool = "CoolOn", Auto = "AutoChangeOver", 
+      ["Auto Change Over"] = "AutoChangeOver"}
+    local level = inst.metrics.level
+    setVar ("ModeStatus", ZtoV[level] or level, meta.service, d)
+--]]
+end,
 
   ["66"] = function (d, inst)       -- Operating_state
+    d, inst = d, inst
   end,
 
   ["67"] = function (d, inst, meta)       -- Setpoint
@@ -690,6 +824,7 @@ local command_class = {
   end,
 
   ["68"] = function (d, inst)       -- ThermostatFanMode
+    d, inst = d, inst
     --	Auto Low,On Low,Auto High,On High,Auto Medium,On Medium,Circulation,Humidity and circulation,Left and right,Up and down,Quite
   end,
 
@@ -714,43 +849,6 @@ local command_class = {
 command_class ["113"] = command_class ["48"]      -- alarm
 command_class ["156"] = command_class ["48"]      -- tamper switch
 
-
-function command_class.new (dino, meta)
-  local updater = command_class[meta.c_class] or command_class["0"]
-  return function (inst, ...)
-      -- call with deviceNo, instance object, and metadata (for persistent data)
-      return updater (dino, inst, meta, ...)
-    end
-end
-
------------------------------------------
---
--- DEVICE status updates: ZWay => openLuup
---
-
-local D = {}    -- device structure simply for the HTTP callback diagnostic
-
-function _G.updateChildren (d)
-  D = d or Z.devices () or {}
-  for _,inst in pairs (D) do
-    local altid, vtype, node, instance = NICS_etc (inst)
-    if node then
-      local zDevNo = OFFSET + node * 10 + instance    -- determine device number from node and id
-      local zDev = luup.devices[zDevNo]
-      if zDev then
-        -- set all the Vdev variables in the Zwave node devices
-        local id = vtype .. altid
-        setVar (id, inst.metrics.level, SID.ZWay, zDevNo)
-        setVar (id .. "_LastUpdate", inst.updateTime, SID.ZWay, zDevNo)
-        setVar ("CommFailure", inst.metrics.isFailed, SID.HaDevice, zDevNo)
-
-        local update = cclass_update [altid]
-        if update then update (inst) end
-      end
-    end
-  end
-  luup.call_delay ("updateChildren", POLLRATE)
-end
 
 
 ----------------------------------------------------
@@ -813,7 +911,7 @@ SensorMultilevel
 	11	"Dew Point"	 - scale: {"C","F"}
 	12	"Rain Rate"	 - scale: {"mm/h","inch/h"}
 	13	"Tide Level"	 - scale: {"m","feet"}
-	14	"Weigth"	 - scale: {"kg","pounds"}
+	14	"Weight"	 - scale: {"kg","pounds"}
 	15	"Voltage"	 - scale: {"V","mV"}
 	16	"Current"	 - scale: {"A","mA"}
 	17	"CO2 Level"
@@ -903,10 +1001,14 @@ SensorMultilevel
   ["145"] = { "D_SceneControllerLED1.xml", SID.SceneControllerLED, "D_SceneControllerLED1.json"}, -- Leviton Zone/scene controller proprietary
   ["152"] = { "D_MotionSensor1.xml", SID.SecuritySensor },
   ["156"] = { "D_FloodSensor1.xml", SID.SecuritySensor, "D_FloodSensor1.json" },    -- "Old alarm sensor"
--- D_Siren1.xml
--- D_SmokeSensor1.xml
 }
 
+for n, cc in pairs (command_class) do
+  CC[n] = {
+    updater = cc,
+    files = vMap[n],
+  }   
+end
 
 --[[
 
@@ -937,11 +1039,12 @@ instance = {
 
 
 -- create metadata for each virtual device instance
-local function vDev_meta (v)
+CC.meta = function (v)
   local altid, vtype, node, instance, c_class, scale, sub_class, sub_scale, tail = NICS_etc(v)
 
   if node then
-    local x = vMap[c_class] or {}
+--    local x = vMap[c_class] or empty
+    local x = (CC[c_class] or empty) .files or empty
     local y = (x.scale or {})[scale] or {}
     local z = setmetatable (y, {__index = x})
 
@@ -972,6 +1075,19 @@ local function vDev_meta (v)
   end
 end
 
+
+end -- COMMAND CLASSES
+
+local command_class = {}
+
+function command_class.new (dino, meta)
+--  local updater = command_class[meta.c_class] or command_class["0"]
+  local updater = (CC[meta.c_class] or CC["0"]) .updater
+  return function (inst, ...)
+    -- call with deviceNo, instance object, and metadata (for persistent data)
+    return updater (dino, inst, meta, ...)
+  end
+end
 
 ----------------------------
 ---
@@ -1094,7 +1210,7 @@ local function configureDevice (id, name, ldv, updaters, child)
   elseif ((classes["37"] and #classes["37"] == 1)             -- ... just one switch
   or      (classes["38"] and #classes["38"] == 1) )           -- ... OR just one dimmer
   and not classes["49"] then                                  -- ...but NOT any sensors
-    local v = (classes["38"] or {})[1] or classes["37"][1]    -- then go for the dimmer
+    local v = (classes["38"] or empty)[1] or classes["37"][1]  -- then go for the dimmer
     upnp_file, json_file, name = add_updater(v)
 
   elseif classes["48"] and #classes["48"] == 1                -- ... just one alarm
@@ -1133,12 +1249,12 @@ local function configureDevice (id, name, ldv, updaters, child)
         child[v.meta.altid] = true                            -- force child creation
       end
     end
-    for _, v in ipairs (classes["48"] or {}) do    -- add motion sensors
+    for _, v in ipairs (classes["48"] or empty) do    -- add motion sensors
       v.meta.upnp_file = DEV.motion
       types["Alarm"] = (types["Alarm"] or 0) + 1
       child[v.meta.altid] = true                            -- force child creation
     end
-    for _, v in ipairs (classes["113"] or {}) do    -- add motion sensors
+    for _, v in ipairs (classes["113"] or empty) do    -- add motion sensors
       if v.meta.sub_class ~= "3" and v.meta.scale ~= "8" then         -- not a tamper switch or low battery notification
         v.meta.upnp_file = DEV.motion
         types["Alarm"] = (types["Alarm"] or 0) + 1
@@ -1179,7 +1295,7 @@ local function index_nodes (d, room0)
   local index = {}
   local room_index = setmetatable ({}, {__index = function() return room0 end})   -- default to room '0'
   for _,v in pairs (d) do
-    local meta = vDev_meta (v) or {} -- construct metadata
+    local meta = CC.meta (v) or {} -- construct metadata
     local node = meta.node
     local instance = meta.instance
     if node and node ~= "0" then    -- 2017.10.04  ignore device "0" (appeared in new firmware update)
@@ -1230,6 +1346,7 @@ local function createChildren (bridgeDevNo, vDevs, room, OFFSET)
       dev = createZwaveDevice (parent, id, name, altid, upnp_file, json_file, room)
     end
     dev.handle_children = true                              -- ensure that any child devices are handled
+    dev.attributes.host = "Z-Way"                           -- flag as a Z-Way hosted device
     if CLONEROOMS then dev: rename (nil, room) end          -- force to given room name
     if dev.room_num == 101 then dev: rename (nil, room) end -- ensure it's not in Room 101!!
     list[#list+1] = id   -- add to new list
@@ -1307,130 +1424,30 @@ end
 
 -----------------------------------------
 --
--- DUMMY Z-WayVDev() API, for testing from file
+-- DEVICE status updates: ZWay => openLuup
 --
 
-local function ZWayVDev_DUMMY_API (filename)
-  local function noop() end
-  local f = assert (io.open (filename), "TEST filename not found")
-  local D = json.decode (f: read "*a")
-  f: close()
+local D = {}    -- device structure simply for the HTTP callback diagnostic
 
-  if D then
-    return {
-      request = noop,
-      command = noop,
-      devices = function () return D end,
-      status  = function () return {data = "OK"} end,
-      zwcommand = noop,
-      zwsend = noop,
-    }
-  end
-end
-
------------------------------------------
---
--- Z-WayVDev() API
---
-
-
-local function ZWayVDev_API (ip, sid)
-
-  local cookie = "ZWAYSession=" .. (sid or '')
-
-  local function HTTP_request (url, body)
-    local response_body = {}
-    local method = body and "POST" or "GET"
---    local response, status, headers = http.request{
-    local _, status = http.request{
-      method = method,
-      url=url,
-      headers = {
-          ["Content-Length"] = body and #body,
-          ["Cookie"]= cookie,
-        },
-      source = body and ltn12.source.string(body),
-      sink = ltn12.sink.table(response_body)
-    }
-    local json_response = table.concat (response_body)
-    if status ~= 200 then
-      _log (url)
-      _log (json_response)
-    end
-    return status, json_response
-  end
-
-  local function HTTP_request_json (url, body)
-    local  status, json_response = HTTP_request (url, body)
-    return status, json.decode (json_response)
-  end
-
-  local function authenticate (user, password)
-    cookie = nil      -- not valud any more
-    local url = "http://%s:8083/ZAutomation/api/v1/login"
-    local data = json.encode {login=user, password = password}
-    local _, j = HTTP_request_json (url: format (ip), data)
-
-    if j then
-      local sid = j and j.data and j.data.sid
-      if sid then
-        cookie = "ZWAYSession=" .. sid
-        setVar ("ZWAYSession", sid)
+function _G.updateChildren (d)
+  D = d or Z.devices () or empty
+  for _,inst in pairs (D) do
+    local altid, vtype, node, instance = NICS_etc (inst)
+    if node then
+      local zDevNo = OFFSET + node * 10 + instance    -- determine device number from node and id
+      local zDev = luup.devices[zDevNo]
+      if zDev then
+        -- set all the Vdev variables in the Zwave node devices
+        local id = vtype .. altid
+        setVar (id, inst.metrics.level, SID.ZWay, zDevNo)
+        setVar (id .. "_LastUpdate", inst.updateTime, SID.ZWay, zDevNo)
+        setVar ("CommFailure", inst.metrics.isFailed, SID.HaDevice, zDevNo)
+        local update = cclass_update [altid]
+        if update then update (inst) end
       end
     end
-    return j
   end
-
-  local function devices ()
-    local url = "http://%s:8083/ZAutomation/api/v1/devices"
-    local _, d = HTTP_request_json (url: format (ip))
-    return d and d.data and d.data.devices or {}
-  end
-
-  -- send a command
-  local function command (id, cmd)
-    local url = "http://%s:8083/ZAutomation/api/v1/devices/ZWayVDev_zway_%s/command/%s"
-    local request = url: format (ip, id, cmd)
-    return HTTP_request_json (request)
-  end
-
-  -- send a zwave command
-
-  local function zwcommand (id, inst, cc, cmd)
-    local url = "http://%s:8083/ZWaveAPI/Run/devices[%s].instances[%s].commandClasses[%s].%s"
-    local request = url: format (ip, id, inst, cc, cmd)
-    return HTTP_request_json (request)
-  end
-
-  local function zwsend (id, data)
-    local url = "http://%s:8083/ZWaveAPI/Run/SendData(%s,%s)"
-    local request = url: format (ip, id, data)
-    return HTTP_request_json (request)
-  end
-
-  -- send a generic request
-  local function request (req)
-    local url = "http://%s:8083%s"
-    local request = url: format (ip, req)
-    return HTTP_request (request)
-  end
-
-  local function status ()
-    local url = "http://%s:8083/ZAutomation/api/v1/status"
-    local _, d = HTTP_request_json (url: format (ip))
-    return d
-  end
-
-  -- ZWayVDev()
-  return {
-    request = request,    -- for low-level access
-    status  = status,
-    command = command,
-    zwcommand = zwcommand,
-    zwsend = zwsend,
-    devices = devices,
-    authenticate = authenticate}
-
+  luup.call_delay ("updateChildren", POLLRATE)
 end
 
 --
@@ -1443,7 +1460,7 @@ local function generic_action (serviceId, action)
     _log (message: format (lul_device, serviceId, action))
     return false
   end
-  local service = SRV[serviceId] or {}
+  local service = SRV[serviceId] or empty
   local act = service [action] or noop
   if type(act) == "function" then act = {run = act} end
   return act
@@ -1456,8 +1473,9 @@ end
 --Login
 function _G.Login (p)
   debug (json.encode(p))
-  local j = Z.authenticate (p.Username, p.Password)
-  if j then
+  local sid = Z.authenticate (p.Username, p.Password)
+  if sid then
+    setVar ("ZWAYSession", sid)     -- save it for later
     setVar ("DisplayLine1", "Restart required", SID.AltUI)
     luup.set_failure (0, devNo)
   end
