@@ -815,7 +815,9 @@ local command_class = {
 end,
 
   ["66"] = function (d, inst)       -- Operating_state
-    d, inst = d, inst
+    local ZtoV = {["0"] = "Idle", ["1"] = "Heating", ["2"] = "Cooling"}		
+    local level = inst.metrics.level			
+    setVar ("ModeState", ZtoV[level] or level, SID.UserOperatingState, d)
   end,
 
   ["67"] = function (d, inst, meta)       -- Setpoint
@@ -832,9 +834,15 @@ end,
     end
   end,
 
-  ["68"] = function (d, inst)       -- ThermostatFanMode
-    d, inst = d, inst
-    --	Auto Low,On Low,Auto High,On High,Auto Medium,On Medium,Circulation,Humidity and circulation,Left and right,Up and down,Quite
+  ["68"] = function (d, inst)  -- Fan Mode
+    d, inst= d, inst
+    --	Auto Low,On Low,Auto High,On High,Auto Medium,On Medium,Circulation,Humidity and circulation,Left and right,Up and down,Quiet
+  end,		
+		
+  ["69"] = function (d, inst)       -- ThermostatFanState
+    local ZtoV = {["0"] = "Idle", ["1"] = "Heating", ["2"] = "Cooling"}		
+    local level = inst.metrics.level			
+    setVar ("ModeState", ZtoV[level] or level, SID.OperatingState, d)
   end,
 
 
