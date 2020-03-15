@@ -1225,6 +1225,22 @@ local function configureDevice (id, name, ldv, updaters, child)
     local v = (classes["38"] or empty)[1] or classes["37"][1]  -- then go for the dimmer
     upnp_file, json_file, name = add_updater(v)
 
+    local meta = classes["49"][1].meta
+    name = table.concat {"multi #", meta.node, '-', meta.instance}
+    local types = {}
+    for _, v in ipairs (classes["113"] or empty) do    -- add motion sensors
+      if v.meta.sub_class ~= "3" and v.meta.scale ~= "8" then         -- not a tamper switch or low battery notification
+        v.meta.upnp_file = DEV.motion
+        types["Alarm"] = (types["Alarm"] or 0) + 1
+        child[v.meta.altid] = true                            -- force child creation
+      end
+    end
+    local display = {}
+    for s in pairs (types) do display[#display+1] = s end
+    table.sort(display)
+    for i,s in ipairs (display) do display[i] = table.concat {s,':',types[s], ' '} end
+    luup.variable_set (SID.AltUI, "DisplayLine1", table.concat (display), id)
+		
   elseif classes["48"] and #classes["48"] == 1                -- ... just one alarm
   and not classes["49"] then                                  -- ...and no sensors
 --  and    classes["49"] and #classes["49"] <= 1 then           -- ...and max only one sensor
