@@ -1220,26 +1220,28 @@ local function configureDevice (id, name, ldv, updaters, child)
 --    name = "rgb #" .. id
 
   elseif ((classes["37"] and #classes["37"] == 1)             -- ... just one switch
-  or      (classes["38"] and #classes["38"] == 1) )           -- ... OR just one dimmer
-  and not classes["49"] then                                  -- ...but NOT any sensors
-    local cl = (classes["38"] or empty)[1] or classes["37"][1]  -- then go for the dimmer
-    upnp_file, json_file, name = add_updater(v)
-
-    local meta = cl.meta
-    name = table.concat {"multi #", meta.node, '-', meta.instance}
-    local types = {}		
-    for _, v in ipairs (cl) do
-      local scale = v.meta.devtype
-      if scale then
-        types[scale] = (types[scale] or 0) + 1
-        child[v.meta.altid] = true                            -- force child creation
-      end
-    end		
-    for _, v in ipairs (classes["113"] or empty) do    -- add motion sensors
-      if v.meta.sub_class ~= "3" and v.meta.scale ~= "8" then         -- not a tamper switch or low battery notification
-        v.meta.upnp_file = DEV.motion
-        types["Alarm"] = (types["Alarm"] or 0) + 1
-        child[v.meta.altid] = true                            -- force child creation
+  or      (classes["38"] and #classes["38"] == 1) ) then          -- ... OR just one dimmer
+    if not classes["49"] and not classes["113"]then             -- ...but NOT any sensors
+      local v = (classes["38"] or empty)[1] or classes["37"][1]
+      upnp_file, json_file, name = add_updater(v)		
+    else		
+      local cl = (classes["38"] or empty)[1] or classes["37"][1]  -- then go for the dimmer
+      local meta = cl.meta
+      name = table.concat {"multi #", meta.node, '-', meta.instance}
+      local types = {}		
+      for _, v in ipairs (cl) do
+        local scale = v.meta.devtype
+        if scale then
+          types[scale] = (types[scale] or 0) + 1
+          child[v.meta.altid] = true                            -- force child creation
+        end
+      end		
+      for _, v in ipairs (classes["113"] or empty) do    -- add motion sensors
+        if v.meta.sub_class ~= "3" and v.meta.scale ~= "8" then         -- not a tamper switch or low battery notification
+          v.meta.upnp_file = DEV.motion
+          types["Alarm"] = (types["Alarm"] or 0) + 1
+          child[v.meta.altid] = true                            -- force child creation
+        end
       end
     end
     local display = {}
