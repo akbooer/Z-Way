@@ -817,7 +817,7 @@ end,
   ["66"] = function (d, inst)       -- Operating_state
     local ZtoV = {["0"] = "Idle", ["1"] = "Heating", ["2"] = "Cooling"}		
     local level = inst.metrics.level			
-    setVar ("ModeState", ZtoV[level] or level, SID.UserOperatingState, d)
+    setVar ("ModeState", ZtoV[level] or level, SID.HVAC_UserOperatingState, d)
   end,
 
   ["67"] = function (d, inst, meta)       -- Setpoint
@@ -842,7 +842,7 @@ end,
   ["69"] = function (d, inst)       -- ThermostatFanState
     local ZtoV = {["0"] = "Idle", ["1"] = "Heating", ["2"] = "Cooling"}		
     local level = inst.metrics.level			
-    setVar ("ModeState", ZtoV[level] or level, SID.OperatingState, d)
+    setVar ("ModeState", ZtoV[level] or level, SID.HVAC_FanOperatingState, d)
   end,
 
 
@@ -1213,6 +1213,14 @@ local function configureDevice (id, name, ldv, updaters, child)
     -- command_class ["68"] Fan_mode
     local tstat = classes["64"][1]
     upnp_file, json_file, name = add_updater (tstat)
+    local ops = classes["66"]  -- operating state		
+    if ops then		
+      add_updater(ops[1])		
+    end		
+    local fst = classes["69"]  -- fan state		
+    if fst then		
+      add_updater(fst[1])		
+    end
     local fmode = classes["68"]
     if fmode then
       add_updater(fmode[1])              -- TODO: extra fan modes
