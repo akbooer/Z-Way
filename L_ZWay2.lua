@@ -815,8 +815,8 @@ local command_class = {
 end,
 
   ["66"] = function (d, inst)       -- Operating_state
-    local ZtoV = {["0"] = "Idle", ["1"] = "Heating", ["2"] = "Cooling"}		
-    local level = inst.metrics.level			
+    local ZtoV = {["0"] = "Idle", ["1"] = "Heating", ["2"] = "Cooling"}
+    local level = inst.metrics.level
     setVar ("ModeState", ZtoV[level] or level, SID.HVAC_UserOperatingState, d)
   end,
 
@@ -837,11 +837,11 @@ end,
   ["68"] = function (d, inst)  -- Fan Mode
     d, inst= d, inst
     --	Auto Low,On Low,Auto High,On High,Auto Medium,On Medium,Circulation,Humidity and circulation,Left and right,Up and down,Quiet
-  end,		
-		
+  end,
+
   ["69"] = function (d, inst)       -- ThermostatFanState
-    local ZtoV = {["0"] = "Idle", ["1"] = "Heating", ["2"] = "Cooling"}		
-    local level = inst.metrics.level			
+    local ZtoV = {["0"] = "Idle", ["1"] = "Heating", ["2"] = "Cooling"}
+    local level = inst.metrics.level
     setVar ("FanState", ZtoV[level] or level, SID.HVAC_FanOperatingMode, d)
   end,
 
@@ -1213,13 +1213,13 @@ local function configureDevice (id, name, ldv, updaters, child)
     -- command_class ["68"] Fan_mode
     local tstat = classes["64"][1]
     upnp_file, json_file, name = add_updater (tstat)
-    local ops = classes["66"]  -- operating state		
-    if ops then		
-      add_updater(ops[1])		
-    end		
-    local fst = classes["69"]  -- fan state		
-    if fst then		
-      add_updater(fst[1])		
+    local ops = classes["66"]  -- operating state
+    if ops then
+      add_updater(ops[1])
+    end
+    local fst = classes["69"]  -- fan state
+    if fst then
+      add_updater(fst[1])
     end
     local fmode = classes["68"]
     if fmode then
@@ -1236,19 +1236,19 @@ local function configureDevice (id, name, ldv, updaters, child)
 --    name = "rgb #" .. id
 
   elseif ((classes["37"] and #classes["37"] == 1)             -- ... just one switch
-  or      (classes["38"] and #classes["38"] == 1) ) then          -- ... OR just one dimmer
-    if not classes["49"] and not classes["113"]then             -- ...but NOT any sensors
+  or      (classes["38"] and #classes["38"] == 1) ) then         -- ... OR just one dimmer
+    if not classes["49"] and not classes ["113"] then             -- ...but NOT any sensors
       local v = (classes["38"] or empty)[1] or classes["37"][1]
-      upnp_file, json_file, name = add_updater(v)		
-    else		
-      local cl = (classes["38"] or empty)[1] or classes["37"][1]  -- then go for the dimmer
+      upnp_file, json_file, name = add_updater(v)
+    else
+      local cl = (classes["38"] or empty)[1] or classes["37"][1]
       local meta = cl.meta
       name = table.concat {"multi #", meta.node, '-', meta.instance}
-      local types = {}		
+      local types = {}
       for _, v in ipairs (cl) do
-          child[v.meta.altid] = true                            -- force child creation
-        end
-      end		
+          types["Switch"] = (types["Switch"] or 0) + 1
+        child[v.meta.altid] = true                            -- force child creation
+      end
       for _, v in ipairs (classes["113"] or empty) do    -- add motion sensors
         if v.meta.sub_class ~= "3" and v.meta.scale ~= "8" then         -- not a tamper switch or low battery notification
           v.meta.upnp_file = DEV.motion
@@ -1256,13 +1256,12 @@ local function configureDevice (id, name, ldv, updaters, child)
           child[v.meta.altid] = true                            -- force child creation
         end
       end
+      local display = {}
+      for s in pairs (types) do display[#display+1] = s end
+      table.sort(display)
+      for i,s in ipairs (display) do display[i] = table.concat {s,':',types[s], ' '} end
+      luup.variable_set (SID.AltUI, "DisplayLine1", table.concat (display), id)
     end
-    local display = {}
-    for s in pairs (types) do display[#display+1] = s end
-    table.sort(display)
-    for i,s in ipairs (display) do display[i] = table.concat {s,':',types[s], ' '} end
-    luup.variable_set (SID.AltUI, "DisplayLine1", table.concat (display), id)
-		
   elseif classes["48"] and #classes["48"] == 1                -- ... just one alarm
   and not classes["49"] then                                  -- ...and no sensors
 --  and    classes["49"] and #classes["49"] <= 1 then           -- ...and max only one sensor
