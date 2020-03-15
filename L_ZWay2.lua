@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 ABOUT = {
   NAME          = "L_ZWay2",
-  VERSION       = "2020.03.13",
+  VERSION       = "2020.03.14",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2020 AKBooer",
@@ -214,7 +214,7 @@ local DEV = setmetatable ({
     controller  = "D_SceneController1.xml",
     combo       = "D_ComboDevice1.xml",
     rgb         = "D_DimmableRGBLight1.xml",
-  
+
   -- D_Siren1.xml
   -- D_SmokeSensor1.xml
 
@@ -223,9 +223,9 @@ local DEV = setmetatable ({
 
 
 local KnownSID = {          -- list of all implemented serviceIds
-  
+
     "urn:akbooer-com:serviceId:ZWay1",
-    
+
     "urn:micasaverde-com:serviceId:Camera1",
     "urn:micasaverde-com:serviceId:Color1",
     "urn:micasaverde-com:serviceId:ComboDevice1",
@@ -241,7 +241,7 @@ local KnownSID = {          -- list of all implemented serviceIds
     "urn:micasaverde-com:serviceId:SecuritySensor1",
     "urn:micasaverde-com:serviceId:WindowCovering1",
     "urn:micasaverde-com:serviceId:ZWaveNetwork1",
-    
+
     "urn:upnp-org:serviceId:Dimming1",
     "urn:upnp-org:serviceId:FanSpeed1",
     "urn:upnp-org:serviceId:HVAC_FanOperatingMode1",
@@ -358,9 +358,9 @@ local function rev_open_or_close (x)
   return y[x] or x
 end
 
--- make either "1" or "true" work the same way
+-- make either "1" or "true" or true work the same way
 local function is_true (flag)
-  local y = {["true"] = true, ["1"] = true}
+  local y = {["true"] = true, ["1"] = true, [true] = true}
   return y [flag]
 end
 
@@ -424,7 +424,7 @@ SRV.Dimming = {
       local level = tostring (args.newLoadlevelTarget or 0)
       local off = level == '0'
       local class = "-38"
-      
+
       luup.variable_set (SID.SwitchPower, "Target", off and '0' or '1', d)
       luup.variable_set (SID.Dimming, "OnEffectLevel", level, d)
       luup.variable_set (SID.Dimming, "LoadLevelTarget", level, d)
@@ -455,13 +455,23 @@ SRV.HaDevice = {
       local id, inst = altid: match (NIaltid)
       Z.zwcommand(id, inst, cc, cmd)
     end,
+
+    SendConfig = function (d,args)
+      local cc = 112
+      local par,cmd,sz = args.parameter, args.command, args.size or 0
+      local data = "Set(%s,%s,%s)"
+      data = data: format(par,cmd,sz)
+      local altid = luup.devices[d].id
+      local id, inst = altid: match (NIaltid)
+      Z.zwcommand(id, inst, cc, data)
+    end,
   }
 
 
 SRV.TemperatureSensor = {
-    
+
     GetCurrentTemperature = {returns = {CurrentTemp = "CurrentTemperature"}},
-  
+
   }
 
 
@@ -677,10 +687,9 @@ SRV.TemperatureSetpoint = {
     GetCurrentSetpoint  = {returns = {CurrentSP  = "CurrentSetpoint"}},
     GetSetpointAchieved = {returns = {CurrentSPA = "SetpointAchieved"}},
 
-    SetCurrentSetpoint = function (...) 
-      return SetCurrentSetpoint (SID.TemperatureSetpoint, ...) 
+    SetCurrentSetpoint = function (...)
+      return SetCurrentSetpoint (SID.TemperatureSetpoint, ...)
     end
-    
 }
 
 local function shallow_copy (x)
@@ -692,14 +701,14 @@ end
 -- these copies MUST be separate tables, since they're used to index the SID table
 SRV.TemperatureSetpoint1_Heat = shallow_copy (SRV.TemperatureSetpoint)
 
-SRV.TemperatureSetpoint1_Heat.SetCurrentSetpoint = function (...) 
-  return SetCurrentSetpoint (SID.TemperatureSetpoint1_Heat, ...) 
+SRV.TemperatureSetpoint1_Heat.SetCurrentSetpoint = function (...)
+  return SetCurrentSetpoint (SID.TemperatureSetpoint1_Heat, ...)
 end
 
 SRV.TemperatureSetpoint1_Cool = shallow_copy (SRV.TemperatureSetpoint)
 
-SRV.TemperatureSetpoint1_Cool.SetCurrentSetpoint = function (...) 
-  return SetCurrentSetpoint (SID.TemperatureSetpoint1_Cool, ...) 
+SRV.TemperatureSetpoint1_Cool.SetCurrentSetpoint = function (...)
+  return SetCurrentSetpoint (SID.TemperatureSetpoint1_Cool, ...)
 end
 
 
@@ -712,7 +721,7 @@ end
 local CC = {}   -- command class object
 
 do -- COMMAND CLASSES
-  
+
 local command_class = {
 
   -- catch-all
@@ -729,7 +738,7 @@ local command_class = {
 
         luup.variable_set (SID.SceneController, "sl_SceneActivated", scene, d)
         luup.variable_set (SID.SceneController, "LastSceneTime",time, d)
-        
+
         meta.click = click
       end
 
@@ -781,12 +790,18 @@ local command_class = {
   ["50"] = function (d, inst, meta)
     local var = (inst.metrics.scaleTitle or '?'): upper ()
     local translate = {W = "Watts", A = "Amps", V = "Volts"}      -- 2020.02.10 thanks @rafale77
-    if var then setVar (translate[var] or var, inst.metrics.level, meta.service, d) end
+    if var then
+    setVar (translate[var] or var, inst.metrics.level, meta.service, d)
+      if var == "KWH" then
+        setVar ("KWHReading", inst.updateTime, meta.service, d)
+      end
+    end
   end,
 
   -- door lock
   ["98"] = function (d, inst)
-    setVar ("Status",open_or_close (inst.metrics.level), SID.DoorLock, d)
+      setVar ("Status",open_or_close (inst.metrics.level), SID.DoorLock, d)
+      setVar ("LastTrip", inst.updateTime, SID.SecuritySensor, d)
   end,
 
   -- thermostat
@@ -798,7 +813,7 @@ local command_class = {
     --  Energy Save Heat,Energy Save Cool,Away Heat,Away Cool,Full Power,Manufacturer Specific.
     -- Vera modes:
 --[[
-    local ZtoV = {Off = "Off", Heat = "HeatOn", Cool = "CoolOn", Auto = "AutoChangeOver", 
+    local ZtoV = {Off = "Off", Heat = "HeatOn", Cool = "CoolOn", Auto = "AutoChangeOver",
       ["Auto Change Over"] = "AutoChangeOver"}
     local level = inst.metrics.level
     setVar ("ModeStatus", ZtoV[level] or level, meta.service, d)
@@ -981,7 +996,7 @@ SensorMultilevel
   ["98"] = { "D_DoorLock1.xml",   SID.DoorLock },
 
   ["102"] = { "D_BinaryLight1.xml",  SID.SwitchPower, "D_GarageDoor_Linear.json" },    -- "Barrier Operator"
-  ["113"] = { "D_DoorSensor1.xml", SID.SecuritySensor, "D_DoorSensor1.json",    -- "Alarm Notifications" 
+  ["113"] = { "D_DoorSensor1.xml", SID.SecuritySensor, "D_DoorSensor1.json",    -- "Alarm Notifications"
      scale = {
 --  1	"Smoke"
 --	2	"CO"     -- "D_SmokeSensor1.xml"
@@ -1007,7 +1022,7 @@ for n, cc in pairs (command_class) do
   CC[n] = {
     updater = cc,
     files = vMap[n],
-  }   
+  }
 end
 
 --[[
@@ -1057,6 +1072,7 @@ CC.meta = function (v)
     return {
       name      = v.metrics.title,
       level     = v.metrics.level,
+      isFailed    = v.metrics.isFailed,
 
       upnp_file = upnp_file,
       service   = service,
@@ -1441,8 +1457,12 @@ function _G.updateChildren (d)
         local id = vtype .. altid
         setVar (id, inst.metrics.level, SID.ZWay, zDevNo)
         setVar (id .. "_LastUpdate", inst.updateTime, SID.ZWay, zDevNo)
-        setVar ("CommFailure", inst.metrics.isFailed, SID.HaDevice, zDevNo)
         local update = cclass_update [altid]
+          local nfail = is_true(inst.metrics.isFailed) and "1" or "0"
+          if nfail ~= fail then
+            setVar ("CommFailure", nfail, SID.HaDevice, zDevNo)
+            if nfail == "1" then setVar("CommFailureTime", os.time(), SID.HaDevice, zDevNo) end
+          end
         if update then update (inst) end
       end
     end
@@ -1485,7 +1505,7 @@ end
 function SendData (p)
   debug (json.encode(p))
   local node, data = p.Node, p.Data
-  if node and data then 
+  if node and data then
     Z.zwsend (node, data)
   end
 end
@@ -1573,7 +1593,7 @@ function init (lul_device)
     setVar ("DisplayLine1", 'Login required', SID.AltUI)
     status, comment = false, "Failed to authenticate"
   end
-  
+
   return status, comment, ABOUT.NAME
 
 end
