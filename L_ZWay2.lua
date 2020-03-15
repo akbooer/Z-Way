@@ -842,7 +842,7 @@ end,
   ["69"] = function (d, inst)       -- ThermostatFanState
     local ZtoV = {["0"] = "Idle", ["1"] = "Heating", ["2"] = "Cooling"}		
     local level = inst.metrics.level			
-    setVar ("ModeState", ZtoV[level] or level, SID.HVAC_FanOperatingState, d)
+    setVar ("FanState", ZtoV[level] or level, SID.HVAC_FanOperatingMode, d)
   end,
 
 
@@ -1246,9 +1246,6 @@ local function configureDevice (id, name, ldv, updaters, child)
       name = table.concat {"multi #", meta.node, '-', meta.instance}
       local types = {}		
       for _, v in ipairs (cl) do
-        local scale = v.meta.devtype
-        if scale then
-          types[scale] = (types[scale] or 0) + 1
           child[v.meta.altid] = true                            -- force child creation
         end
       end		
