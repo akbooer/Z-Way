@@ -1225,7 +1225,7 @@ local function configureDevice (id, name, ldv, updaters, child)
     local v = (classes["38"] or empty)[1] or classes["37"][1]  -- then go for the dimmer
     upnp_file, json_file, name = add_updater(v)
 
-    local meta = classes["38"][1].meta
+    local meta = (classes["38"][1].meta or empty) or classes["37"][1].meta
     name = table.concat {"multi #", meta.node, '-', meta.instance}
     local types = {}
     for _, v in ipairs (classes["113"] or empty) do    -- add motion sensors
