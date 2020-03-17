@@ -481,6 +481,16 @@ SRV.HaDevice = {
       local id, inst = altid: match (NIaltid)
       Z.zwcommand(id, inst, cc, cmd)
     end,
+
+    SendConfig = function (d,args)
+      local cc = 112
+      local par,cmd,sz = args.parameter, args.command, args.size or 0
+      local data = "Set(%s,%s,%s)"
+      data = data: format(par,cmd,sz)
+      local altid = luup.devices[d].id
+      local id, inst = altid: match (NIaltid)
+      Z.zwcommand(id, inst, cc, data)
+    end,
   }
 
 
@@ -1262,6 +1272,14 @@ local function configureDevice (id, name, ldv, child)
     -- command_class ["68"] Fan_mode
     local tstat = classes["64"][1]
     upnp_file, json_file, name = add_updater (tstat)
+    local ops = classes["66"]  -- operating state
+    if ops then
+      add_updater(ops[1])
+    end
+    local fst = classes["69"]  -- fan state
+    if fst then
+      add_updater(fst[1])
+    end
     local fmode = classes["68"]
     if fmode then
       add_updater(fmode[1])              -- TODO: extra fan modes
@@ -1277,11 +1295,32 @@ local function configureDevice (id, name, ldv, child)
 --    name = "rgb #" .. id
 
   elseif ((classes["37"] and #classes["37"] == 1)             -- ... just one switch
-  or      (classes["38"] and #classes["38"] == 1) )           -- ... OR just one dimmer
-  and not classes["49"] then                                  -- ...but NOT any sensors
-    local v = (classes["38"] or empty)[1] or classes["37"][1]  -- then go for the dimmer
-    upnp_file, json_file, name = add_updater(v)
-
+  or      (classes["38"] and #classes["38"] == 1) ) then         -- ... OR just one dimmer
+    if not classes["49"] and not classes ["113"] then             -- ...but NOT any sensors
+      local v = (classes["38"] or empty)[1] or classes["37"][1]
+      upnp_file, json_file, name = add_updater(v)
+    else
+      local cl = (classes["38"] or empty)[1] or classes["37"][1]
+      local meta = cl.meta
+      name = table.concat {"multi #", meta.node, '-', meta.instance}
+      local types = {}
+      for _, v in ipairs (cl) do
+          types["Switch"] = (types["Switch"] or 0) + 1
+        child[v.meta.altid] = true                            -- force child creation
+      end
+      for _, v in ipairs (classes["113"] or empty) do    -- add motion sensors
+        if v.meta.sub_class ~= "3" and v.meta.scale ~= "8" then         -- not a tamper switch or low battery notification
+          v.meta.upnp_file = DEV.motion
+          types["Alarm"] = (types["Alarm"] or 0) + 1
+          child[v.meta.altid] = true                            -- force child creation
+        end
+      end
+      local display = {}
+      for s in pairs (types) do display[#display+1] = s end
+      table.sort(display)
+      for i,s in ipairs (display) do display[i] = table.concat {s,':',types[s], ' '} end
+      luup.variable_set (SID.AltUI, "DisplayLine1", table.concat (display), id)
+    end
   elseif classes["48"] and #classes["48"] == 1                -- ... just one alarm
   and not classes["49"] then                                  -- ...and no sensors
 --  and    classes["49"] and #classes["49"] <= 1 then           -- ...and max only one sensor
@@ -1520,6 +1559,11 @@ local function updateChildren (vDevs)
         failed[zDevNo] = failed[zDevNo] or inst.metrics.isFailed and altid  -- spot failed vDevs
 
         local update = cclass_update [altid]
+          local nfail = is_true(inst.metrics.isFailed) and "1" or "0"
+          if nfail ~= fail then
+            setVar ("CommFailure", nfail, SID.HaDevice, zDevNo)
+            if nfail == "1" then setVar("CommFailureTime", os.time(), SID.HaDevice, zDevNo) end
+          end
         if update then update (inst) end
       end
     end
