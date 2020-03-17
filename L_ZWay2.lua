@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 ABOUT = {
   NAME          = "L_ZWay2",
-  VERSION       = "2020.03.16",
+  VERSION       = "2020.03.16b",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2020 AKBooer",
@@ -1559,11 +1559,6 @@ local function updateChildren (vDevs)
         failed[zDevNo] = failed[zDevNo] or inst.metrics.isFailed and altid  -- spot failed vDevs
 
         local update = cclass_update [altid]
-          local nfail = is_true(inst.metrics.isFailed) and "1" or "0"
-          if nfail ~= fail then
-            setVar ("CommFailure", nfail, SID.HaDevice, zDevNo)
-            if nfail == "1" then setVar("CommFailureTime", os.time(), SID.HaDevice, zDevNo) end
-          end
         if update then update (inst) end
       end
     end
