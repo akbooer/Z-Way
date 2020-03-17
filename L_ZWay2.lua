@@ -1005,8 +1005,9 @@ local CC = {   -- command class object
   -- door lock
   ["98"] = {
     updater = function (d, inst)
-      setVar ("Status",open_or_close (inst.metrics.level), SID.DoorLock, d)
-      setVar ("LastTrip", inst.updateTime, SID.SecuritySensor, d)
+      local status = open_or_close (inst.metrics.level)
+      setVar ("Status", status, SID.DoorLock, d)
+      setVar ("Tripped", status, SID.SecuritySensor, d)
     end,
 
     files = { "D_DoorLock1.xml",   SID.DoorLock },
@@ -1300,14 +1301,11 @@ local function configureDevice (id, name, ldv, child)
       local v = (classes["38"] or empty)[1] or classes["37"][1]
       upnp_file, json_file, name = add_updater(v)
     else
-      local cl = (classes["38"] or empty)[1] or classes["37"][1]
-      local meta = cl.meta
+      local v = (classes["38"] or classes["37"]) [1]
+      local meta = v.meta
       name = table.concat {"multi #", meta.node, '-', meta.instance}
-      local types = {}
-      for _, v in ipairs (cl) do
-          types["Switch"] = (types["Switch"] or 0) + 1
-        child[v.meta.altid] = true                            -- force child creation
-      end
+      local types = {["Switch"] = 1}
+       child[v.meta.altid] = true                            -- force child creation
       for _, v in ipairs (classes["113"] or empty) do    -- add motion sensors
         if v.meta.sub_class ~= "3" and v.meta.scale ~= "8" then         -- not a tamper switch or low battery notification
           v.meta.upnp_file = DEV.motion
