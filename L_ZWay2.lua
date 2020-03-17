@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 ABOUT = {
   NAME          = "L_ZWay2",
-  VERSION       = "2020.03.13",
+  VERSION       = "2020.03.16",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2020 AKBooer",
@@ -45,12 +45,12 @@ ABOUT = {
 -- ...         sundry iterations on GitHub
 -- 2020.03.11  add SendData action (thanks @DesT), fix nil setpoint serviceId
 -- 2020.03.12  complete restructure in progress...
-
-
+-- 2020.03.16  continued refactoring ... including asynchronous HTTP requests
 
 
 local json    = require "openLuup.json"
-local chdev   = require "openLuup.chdev"    -- NOT the same as the luup.chdev module! (special create fct)
+local chdev   = require "openLuup.chdev"      -- NOT the same as the luup.chdev module! (special create fct)
+local async   = require "openLuup.http_async"
 local http    = require "socket.http"
 local ltn12   = require "ltn12"
 
@@ -78,27 +78,44 @@ end
 local function ZWayVDev_API (ip, sid)
 
   local cookie = "ZWAYSession=" .. (sid or '')
+--    local ok, err = async.request (url, VeraBridge_async_callback)
 
-  local function HTTP_request (url, body)
-    local response_body = {}
-    local method = body and "POST" or "GET"
---    local response, status, headers = http.request{
-    local _, status = http.request{
-      method = method,
-      url=url,
+  local function build_request (url, body, response_body)
+    return {
+      method = body and "POST" or "GET",
+      url = url,
       headers = {
           ["Content-Length"] = body and #body,
-          ["Cookie"]= cookie,
+          ["Cookie"] = cookie,
         },
       source = body and ltn12.source.string(body),
       sink = ltn12.sink.table(response_body)
     }
+  end
+  
+  local function build_response (url, status, response_body)
     local json_response = table.concat (response_body)
     if status ~= 200 then
       _log (url)
       _log (json_response)
     end
     return status, json_response
+  end
+  
+  local function HTTP_request (url, body)
+    local response_body = {}
+    local _, status = http.request (build_request (url, body, response_body))
+    return build_response (url, status, response_body)
+  end
+  
+  local function HTTP_async_request (url, body_or_callback, callback)
+    local response_body = {}
+    local body = callback and body_or_callback or nil
+    callback = callback or body_or_callback
+    return async.request (build_request (url, body, response_body), -- return request status, not result
+      function (_, status)
+        callback (build_response (url, status, response_body))
+      end)
   end
 
   local function HTTP_request_json (url, body)
@@ -149,6 +166,13 @@ local function ZWayVDev_API (ip, sid)
     return HTTP_request (request)
   end
 
+  -- send a generic ASYNC request
+  local function async_request (req, callback)
+    local url = "http://%s:8083%s"
+    local request = url: format (ip, req)
+    return HTTP_async_request (request, callback)
+  end
+
   -- return status
   local function status ()
     local url = "http://%s:8083/ZAutomation/api/v1/status"
@@ -157,13 +181,16 @@ local function ZWayVDev_API (ip, sid)
   end
 
   return {
-    request = request,    -- for low-level access
-    status  = status,
-    command = command,
-    zwcommand = zwcommand,
-    zwsend = zwsend,
-    devices = devices,
-    authenticate = authenticate}
+    request       = request,          -- for low-level access
+    status        = status,
+    command       = command,
+    zwcommand     = zwcommand,
+    zwsend        = zwsend,
+    devices       = devices,
+    authenticate  = authenticate,
+
+    async_request = async_request,    -- ditto, asynchronous
+  }
 end
 
 -----------------------------------------
@@ -174,9 +201,11 @@ end
 local function ZWayVDev_DUMMY_API (filename)
   local function noop() end
   local f = assert (io.open (filename), "TEST filename not found")
-  local D = json.decode (f: read "*a")
+  local J = f: read "*a"
   f: close()
-
+  
+  local D = json.decode (J)
+    
   if D then
     return {
       request = noop,
@@ -185,7 +214,7 @@ local function ZWayVDev_DUMMY_API (filename)
       status  = function () return {data = "OK"} end,
       zwcommand = noop,
       zwsend = noop,
-    }
+}
   end
 end
 
@@ -196,9 +225,11 @@ local Z         -- the Zway API object
 
 local cclass_update   -- table of command_class updaters indexed by altid
 
-local devNo     -- our device number
-local OFFSET    -- bridge offset for child devices
-local POLLRATE  -- poll rate for Zway devices
+local devNo         -- our device number
+local OFFSET        -- bridge offset for child devices
+
+local ASYNCPOLL     -- asynch polling if true
+local POLLRATE      -- poll rate for Zway devices
 
 local CLONEROOMS    --
 local NAMEDEVICES   --
@@ -707,147 +738,342 @@ end
 --
 -- COMMAND CLASSES - virtual device updates
 --
+-- CC contains:
+--    updater = a function to update device variables on ZWay changes
+--    files   = a data structure containing {upnp_file, serviceId, json_file}
+--              and, optionally, alternatives for specified scales (sub-classes)
+--
 
-
-local CC = {}   -- command class object
-
-do -- COMMAND CLASSES
+local CC = {   -- command class object
   
-local command_class = {
-
   -- catch-all
-  ["0"] = function (d, inst, meta)
+  ["0"] = {
+    updater = function (d, inst, meta)
+      local dev = luup.devices[d]
 
-    -- scene controller
-    local dev = luup.devices[d]
-    if dev.attributes.device_file == DEV.controller then   -- this is the Luup device file
-      local click = inst.updateTime
---      setVar ("LastUpdate_" .. meta.altid, click, SID.ZWay, d)
-      if click ~= meta.click then -- force variable updates
-        local scene = meta.scale
-        local time  = os.time()     -- "◷" == json.decode [["\u25F7"]]
+      -- scene controller
+      if dev.attributes.device_file == DEV.controller then
+        local click = inst.updateTime
+        --      setVar ("LastUpdate_" .. meta.altid, click, SID.ZWay, d)
+        if click ~= meta.click then -- force variable updates
+          local scene = meta.scale
+          local time  = os.time()     -- "◷" == json.decode [["\u25F7"]]
 
-        luup.variable_set (SID.SceneController, "sl_SceneActivated", scene, d)
-        luup.variable_set (SID.SceneController, "LastSceneTime",time, d)
-        
-        meta.click = click
+          luup.variable_set (SID.SceneController, "sl_SceneActivated", scene, d)
+          luup.variable_set (SID.SceneController, "LastSceneTime",time, d)
+
+          meta.click = click
+        end
+
+      else
+        --  local message = "no update for device %d [%s] %s %s"
+        --  log (message: format (d, inst.id, inst.deviceType or '?', (inst.metrics or {}).icon or ''))
+        --...
       end
+    end,
 
-    else
---        local message = "no update for device %d [%s] %s %s"
---        log (message: format (d, inst.id, inst.deviceType or '?', (inst.metrics or {}).icon or ''))
-      --...
-    end
-  end,
+    files = { nil, SID.HaDevice },    -- device, service, json files
+  },
 
   -- binary switch
-  ["37"] = function (d, inst, meta)
-    setVar ("Status",on_or_off (inst.metrics.level), meta.service, d)
-  end,
+  ["37"] = {
+    updater = function (d, inst, meta)
+      setVar ("Status",on_or_off (inst.metrics.level), meta.service, d)
+    end,
+    
+    files = { "D_BinaryLight1.xml", SID.SwitchPower },
+  },
 
   -- multilevel switch
-  ["38"] = function (d, inst, meta)
-    local level = tonumber (inst.metrics.level) or 0
-    setVar ("LoadLevelStatus", level, meta.service, d)
-    local status = (level > 0 and "1") or "0"
-    setVar ("Status", status, SID.SwitchPower, d)
-  end,
+  ["38"] = {
+    updater = function (d, inst, meta)
+      local level = tonumber (inst.metrics.level) or 0
+      setVar ("LoadLevelStatus", level, meta.service, d)
+      local status = (level > 0 and "1") or "0"
+      setVar ("Status", status, SID.SwitchPower, d)
+    end,
 
+    files = { "D_DimmableLight1.xml", SID.Dimming },
+  },
+
+  -- Scene Controller Configuration
+  ["45"] = {
+    updater = function (d, inst)
+      d, inst = d, inst
+    end,
+    
+     -- Leviton Zone/scene controller
+    files = { "D_SceneControllerLED1.xml", SID.SceneControllerLED, "D_SceneControllerLED1.json"},
+  },
+  
   -- binary sensor
-  ["48"] = function (d, inst)
-    local sid = SID.SecuritySensor
-    local tripped = on_or_off (inst.metrics.level)
-    local old = getVar ("Tripped", sid)
-    -- 2020.02.15  LastTrip and ArmedTripped  generated by openLuup itself
-    if tripped ~= old then
-      setVar ("Tripped", tripped, sid, d)
-    end
-  end,
+  ["48"] = {
+    updater = function (d, inst)
+      local sid = SID.SecuritySensor
+      local tripped = on_or_off (inst.metrics.level)
+      local old = getVar ("Tripped", sid)
+      -- NB: LastTrip and ArmedTripped are generated by openLuup itself
+      if tripped ~= old then
+        setVar ("Tripped", tripped, sid, d)
+      end
+    end,
 
-  -- multilevel sensor
-  ["49"] = function (d, inst, meta)   -- TODO: more to do here to sub-type?
-    local sensor_variable_name = {
-      [SID.TemperatureSensor]    = "CurrentTemperature",
-      [SID.EnergyMetering] = "W",    --  2020.03.05  "Watts" conflicts with meter "50-2" if both present
-    }
-    local var = sensor_variable_name[meta.service] or "CurrentLevel"
-    local value = inst.metrics.level
-    local round = "%0.4f"
-    value = tonumber(round: format (value) )       -- 2020.02.22 TODO: why are some values not rounded?
-    setVar (var, value, meta.service, d)
-  end,
+    files = { "D_MotionSensor1.xml", SID.SecuritySensor,        -- SensorBinary
+        ["1"] = { nil, nil, "D_GlassBreakSensorWithTamper.json" },      --	1	"Glass Break"
+        ["2"] = {"D_SmokeSensor1.xml"},                                 --	2 "Smoke"
+        ["3"] = {"D_SmokeSensor1.xml", nil, "D_SmokeCoSensor1.json"},   --	3	"CO"
+        --	4	"CO2"
+        --	5	"Heat"
+        ["6"] = { "D_FloodSensor1.xml", nil, "D_FloodSensor1.json" }, --	6	"Water"
+        --	7	"Freeze"
+        --	8	"Tamper"
+        --	9	"Aux"
+        ["10"] = { "D_DoorSensor1.xml" }, --	10	"Door/Window"
+        --	11	"Tilt"
+        --	12	"Motion"
+        --	13	"Glass Break"
+        --	14	"First supported Sensor Type"
+        },
+  },
+
+    -- multilevel sensor
+    ["49"] = {
+      updater = function (d, inst, meta)   -- TODO: more to do here to sub-type?
+        local sensor_variable_name = {
+          [SID.TemperatureSensor] = "CurrentTemperature",
+          [SID.EnergyMetering] = "W",    --  2020.03.05  "Watts" conflicts with meter "50-2" if both present
+        }
+        local var = sensor_variable_name[meta.service] or "CurrentLevel"
+        local value = inst.metrics.level
+        local round = "%0.4f"
+        value = tonumber(round: format (value) )       -- 2020.02.22 TODO: why are some values not rounded?
+        setVar (var, value, meta.service, d)
+      end,
+
+      files = {  -- SensorMultilevel: no default device or service
+          ["1"]  = { "D_TemperatureSensor1.xml",  SID.TemperatureSensor },    -- scale: {"C","F"}
+          ["2"]  = { "D_GenericSensor1.xml",      SID.GenericSensor },        -- scale: {"","%"}
+          ["3"]  = { "D_LightSensor1.xml",        SID.LightSensor},           -- scale: {"%","Lux"}
+          ["4"]  = { "D_PowerMeter1.xml",         SID.EnergyMetering},        -- scale: {"W","Btu/h"}
+          ["5"]  = { "D_HumiditySensor1.xml",     SID.HumiditySensor},        -- scale: {"%","Absolute humidity"}
+          ["27"] = { "D_LightSensor1.xml",        SID.LightSensor,     "D_UVSensor1.json" }
+        },
+      --[[
+        6	"Velocity"	 - scale: {"m/s","mph"}
+        7	"Direction"
+        8	"Athmospheric Pressure"	 - scale: {"kPa","inch Mercury"}
+        9	"Barometric Pressure"	 - scale: {"kPa","inch Mercury"}
+        10	"Solar Radiation"
+        11	"Dew Point"	 - scale: {"C","F"}
+        12	"Rain Rate"	 - scale: {"mm/h","inch/h"}
+        13	"Tide Level"	 - scale: {"m","feet"}
+        14	"Weight"	 - scale: {"kg","pounds"}
+        15	"Voltage"	 - scale: {"V","mV"}
+        16	"Current"	 - scale: {"A","mA"}
+        17	"CO2 Level"
+        18	"Air Flow"	 - scale: {"m3/h","cfm"}
+        19	"Tank Capacity"	 - scale: {"l","cbm","gallons"}
+        20	"Distance"	 - scale: {"m","cm","Feet"}
+        21	"Angle Position"	 - scale: {"%","Degree to North Pole","Degree to South Pole"}
+        22	"Rotation"	 - scale: {"rpm","Hz"}
+        23	"Water temperature"	 - scale: {"C","F"}
+        24	"Soil temperature"	 - scale: {"C","F"}
+        25	"Seismic intensity"	 - scale: {"Mercalli","European Macroseismic","Liedu","Shindo"}
+        26	"Seismic magnitude"	 - scale: {"Local","Moment","Surface wave","Body wave"}
+        27	"Ultraviolet"
+        28	"Electrical resistivity"
+        29	"Electrical conductivity"
+        30	"Loudness"	 - scale: {"Absolute loudness (dB)","A-weighted decibels (dBA)"}
+        31	"Moisture"	 - scale: {"%","Volume water content (m3/m3)","Impedance (kΩ)","Water activity (aw)"}
+        32	"Frequency"	 - scale: {"Hz","kHz"}
+        33	"Time"
+        34	"Target Temperature"	 - scale: {"C","F"}
+        35	"Particulate Matter"	 - scale: {"mol/m3","μg/m3"}
+        36	"Formaldehyde (CH2O)"
+        37	"Radon Concentration"	 - scale: {"bq/m3","pCi/L"}
+        38	"Methane Density (CH4)"
+        39	"Volatile Organic Compound (VOC)"
+        40	"Carbon Monoxide (CO)"
+        41	"Soil Humidity"
+        42	"Soil Reactivity"
+        43	"Soil Salinity"
+        44	"Heart Rate"
+        45	"Blood Pressure"	 - scale: {"Systolic (mmHg)","Diastolic (mmHg)"}
+        46	"Muscle Mass"
+        47	"Fat Mass"
+        48	"Bone Mass"
+        49	"Total Body Water"
+        50	"Basic Metabolic Rate"
+        51	"Body Mass Index"
+        52	"Acceleration￼X-axis"
+        53	"Acceleration￼Y-axis"
+        54	"Acceleration￼Z-axis"
+        55	"Smoke Density"
+        --]]
+  },
 
   -- meter
-  ["50"] = function (d, inst, meta)
+  ["50"] = {
+    updater = function (d, inst, meta)
     local var = (inst.metrics.scaleTitle or '?'): upper ()
     local translate = {W = "Watts", A = "Amps", V = "Volts"}      -- 2020.02.10 thanks @rafale77
     if var then setVar (translate[var] or var, inst.metrics.level, meta.service, d) end
   end,
 
+  files = { "D_PowerMeter1.xml", SID.EnergyMetering },   -- device is "D_PowerMeter1.xml"
+  --[[
+  Meter
+    1	"Electric"	 - scale: {"kWh","kVAh","W","Pulse Count","V","A","Power Factor"}
+    2	"Gas"	 - scale: {"Cubic meter","Cubic feet","reserved","Pulse Count"}
+    3	"Water"	 - scale: {"Cubic meter","Cubic feet","US Gallon","Pulse Count"}
+  --]]
+  
+  },
+
+  -- switch color
+  ["51"] = {
+    updater = function () end,
+    files = {nil, SID.Dimming },   
+  },
+
+  -- thermostat mode
+  ["64"] = {
+    updater = function (d, inst, meta)
+      d, inst, meta = d, inst, meta
+      -- ZWay modes:
+      --	Off,Heat,Cool,Auto,Auxiliary,Resume,Fan Only,Furnace,Dry Air,Moist Air,Auto Change Over,
+      --  Energy Save Heat,Energy Save Cool,Away Heat,Away Cool,Full Power,Manufacturer Specific.
+      -- Vera modes:
+  --[[
+      local ZtoV = {Off = "Off", Heat = "HeatOn", Cool = "CoolOn", Auto = "AutoChangeOver", 
+        ["Auto Change Over"] = "AutoChangeOver"}
+      local level = inst.metrics.level
+      setVar ("ModeStatus", ZtoV[level] or level, meta.service, d)
+  --]]
+    end,
+
+    files = { "D_HVAC_ZoneThermostat1.xml", SID.HVAC_UserOperatingMode},
+  },
+
+  -- Operating_state
+  ["66"] = {
+    updater = function () end,
+
+  files = { nil, SID.HVAC_OperatingState },
+  },
+  
+  ["67"] = {
+    updater = function (d, inst, meta)       -- Setpoint
+      --	Heating,Cooling,Furnace,Dry Air,Moist Air,Auto Change Over,Energy Save Heating,Energy Save Cooling,Away Heating,Away Cooling,Full Power
+      local scale = meta.scale
+      local sid
+      if scale == "1" then  -- heat
+        sid = SID.TemperatureSetpoint1_Heat
+      elseif scale == "2" then  -- cool
+        sid = SID.TemperatureSetpoint1_Cool
+      end
+      if sid then
+        setVar ("CurrentSetpoint", inst.metrics.level, sid, d)      -- 2020.02.10, thanks @rafale77
+      end
+    end,
+  
+  files = { nil, SID.TemperatureSetpoint, -- Setpoint
+      ["1"]  = { nil, SID.TemperatureSetpoint1_Heat },
+      ["2"]  = { nil, SID.TemperatureSetpoint1_Cool },
+    },
+  },
+
+  -- ThermostatFanMode
+  ["68"] = {
+    updater = function (d, inst)       
+      d, inst = d, inst
+      --	Auto Low,On Low,Auto High,On High,Auto Medium,On Medium,Circulation,Humidity and circulation,Left and right,Up and down,Quiet
+    end,
+
+  files = {nil, SID.HVAC_FanOperatingMode},
+  },
+
+
   -- door lock
-  ["98"] = function (d, inst)
-    setVar ("Status",open_or_close (inst.metrics.level), SID.DoorLock, d)
-  end,
-
-  -- thermostat
-
-  ["64"] = function (d, inst, meta)       -- ThermostatMode
-    d, inst, meta = d, inst, meta
-    -- ZWay modes:
-    --	Off,Heat,Cool,Auto,Auxiliary,Resume,Fan Only,Furnace,Dry Air,Moist Air,Auto Change Over,
-    --  Energy Save Heat,Energy Save Cool,Away Heat,Away Cool,Full Power,Manufacturer Specific.
-    -- Vera modes:
---[[
-    local ZtoV = {Off = "Off", Heat = "HeatOn", Cool = "CoolOn", Auto = "AutoChangeOver", 
-      ["Auto Change Over"] = "AutoChangeOver"}
-    local level = inst.metrics.level
-    setVar ("ModeStatus", ZtoV[level] or level, meta.service, d)
---]]
-end,
-
-  ["66"] = function (d, inst)       -- Operating_state
-    d, inst = d, inst
-  end,
-
-  ["67"] = function (d, inst, meta)       -- Setpoint
-    --	Heating,Cooling,Furnace,Dry Air,Moist Air,Auto Change Over,Energy Save Heating,Energy Save Cooling,Away Heating,Away Cooling,Full Power
-    local scale = meta.scale
-    local sid
-    if scale == "1" then  -- heat
-      sid = SID.TemperatureSetpoint1_Heat
-    elseif scale == "2" then  -- cool
-      sid = SID.TemperatureSetpoint1_Cool
-    end
-    if sid then
-      setVar ("CurrentSetpoint", inst.metrics.level, sid, d)      -- 2020.02.10, thanks @rafale77
-    end
-  end,
-
-  ["68"] = function (d, inst)       -- ThermostatFanMode
-    d, inst = d, inst
-    --	Auto Low,On Low,Auto High,On High,Auto Medium,On Medium,Circulation,Humidity and circulation,Left and right,Up and down,Quite
-  end,
+  ["98"] = {
+    updater = function (d, inst)
+      setVar ("Status",open_or_close (inst.metrics.level), SID.DoorLock, d)
+    end,
+    
+    files = { "D_DoorLock1.xml",   SID.DoorLock },
+  },
 
 
   -- barrier operator (eg. garage door)
-  ["102"] = function (d, inst)
-    local status = rev_open_or_close (inst.metrics.level)
-    setVar ("Status", status, SID.DoorLock, d)
-    setVar ("Status", status, SID.SwitchPower, d) -- correct readback for garage door
-  end,
+  ["102"] = {
+    updater = function (d, inst)
+      local status = rev_open_or_close (inst.metrics.level)
+      setVar ("Status", status, SID.DoorLock, d)
+      setVar ("Status", status, SID.SwitchPower, d) -- correct readback for garage door
+    end,
 
+    files = { "D_BinaryLight1.xml",  SID.SwitchPower, "D_GarageDoor_Linear.json" },    -- "Barrier Operator"
+  },
+
+  -- Alarm / Notification
+  ["113"] = {
+    updater = nil,      -- shared with CC#48 (see below)
+    
+    files = { "D_DoorSensor1.xml", SID.SecuritySensor, "D_DoorSensor1.json",    
+  --  1	"Smoke"
+  --	2	"CO"     -- "D_SmokeSensor1.xml"
+  --	3	"CO2"    -- "D_SmokeCoSensor1.json"
+  --	4	"Heat"
+        ["5"] = { "D_FloodSensor1.xml",  nil, "D_FloodSensor1.json" },    -- "Water"
+        ["6"] = { "D_DoorSensor1.xml",   nil, "D_DoorSensor1.json" },     -- "Access Control"
+        ["7"] = { "D_MotionSensor1.xml", nil, "D_MotionSensor1.json" },   -- "Tamper or generic motion"
+  --	8	"Power"
+  --	9	"System"
+  --  10 "Emergency"
+  --	11 "Tilt"
+  --	12 "Motion"
+  --]]
+    },
+  },
+  
   -- battery
-  ["128"] = function (d, inst)
-    local level = tonumber (inst.metrics.level)
-    local warning = (level < 10) and "1" or "0"
-    setVar ("BatteryLevel", level, SID.HaDevice, d)
-    setVar ("sl_BatteryAlarm", warning, SID.HaDevice, d)
-  end,
+  ["128"] = {
+    updater = function (d, inst)
+      local level = tonumber (inst.metrics.level)
+      local warning = (level < 10) and "1" or "0"
+      setVar ("BatteryLevel", level, SID.HaDevice, d)
+      setVar ("sl_BatteryAlarm", warning, SID.HaDevice, d)
+    end,
+    
+    files = { nil, SID.EnergyMetering },
+  },
+
+  -- Manufacturer proprietary
+  -- Leviton Zone/scene controller 
+  ["145"] = {
+    updater = function () end,
+    
+    files =  { "D_SceneControllerLED1.xml", SID.SceneControllerLED, "D_SceneControllerLED1.json"}, 
+  },
+  
+  ["152"] = {
+    updater = function () end,
+  
+    files = { "D_MotionSensor1.xml", SID.SecuritySensor },
+  },
+  
+  -- deprecated alarm
+  ["156"] = {
+    updater = nil,      -- shared with CC#48 (see below)
+
+    files = { "D_FloodSensor1.xml", SID.SecuritySensor, "D_FloodSensor1.json" },
+  },
 
 }
 
-command_class ["113"] = command_class ["48"]      -- alarm
-command_class ["156"] = command_class ["48"]      -- tamper switch
+
+CC ["113"].updater = CC ["48"].updater      -- alarm
+CC ["156"].updater = CC ["48"].updater      -- tamper switch (deprecated)
 
 
 
@@ -860,155 +1086,6 @@ command_class ["156"] = command_class ["48"]      -- tamper switch
 -- ...and from the service files, the actions and variables.
 --
 
-
--- c_class, {upnp_file, serviceId, json_file}, [scale = {...}] }
-local vMap = {
-  ["0"]  = { nil, SID.HaDevice },   -- not really a NO_OP, but a "catch-all"
-
-  ["37"] = { "D_BinaryLight1.xml",      SID.SwitchPower       },
-  ["38"] = { "D_DimmableLight1.xml",    SID.Dimming },
-  ["45"] = { "D_SceneControllerLED1.xml", SID.SceneControllerLED, "D_SceneControllerLED1.json"}, -- Leviton Zone/scene controller
-  ["48"] = { "D_MotionSensor1.xml",     SID.SecuritySensor ,        -- SensorBinary
-    scale = {
-        ["1"] = { nil, nil, "D_GlassBreakSensorWithTamper.json" }, --	1	"Glass Break"
---	2	"Smoke"     -- "D_SmokeSensor1.xml"
---	3	"CO"        -- "D_SmokeCoSensor1.json"
---	4	"CO2"
---	5	"Heat"
-        ["6"] = { "D_FloodSensor1.xml", nil, "D_FloodSensor1.json" }, --	6	"Water"
---	7	"Freeze"
---	8	"Tamper"
---	9	"Aux"
-        ["10"] = { "D_DoorSensor1.xml" }, --	10	"Door/Window"
---	11	"Tilt"
---	12	"Motion"
---	13	"Glass Break"
---	14	"First supported Sensor Type"
---]]
-    }},
-  ["49"] = {  -- SensorMultilevel: no default device or service
-    scale = {
-      ["1"]  = { "D_TemperatureSensor1.xml",  SID.TemperatureSensor },
-      ["2"]  = { "D_GenericSensor1.xml",      SID.GenericSensor },
-      ["3"]  = { "D_LightSensor1.xml",        SID.LightSensor},
-      ["4"]  = { "D_PowerMeter1.xml",         SID.EnergyMetering},
-      ["5"]  = { "D_HumiditySensor1.xml",     SID.HumiditySensor},
-      ["27"] = { "D_LightSensor1.xml",        SID.LightSensor,     "D_UVSensor1.json" } -- .json for icon
-    }},
-  --[[
-
-SensorMultilevel
-	1	"Temperature"	 - scale: {"C","F"}
-	2	"Generic"	 - scale: {"","%"}
-	3	"Luminiscence"	 - scale: {"%","Lux"}
-	4	"Power"	 - scale: {"W","Btu/h"}
-	5	"Humidity"	 - scale: {"%","Absolute humidity"}
-	6	"Velocity"	 - scale: {"m/s","mph"}
-	7	"Direction"
-	8	"Athmospheric Pressure"	 - scale: {"kPa","inch Mercury"}
-	9	"Barometric Pressure"	 - scale: {"kPa","inch Mercury"}
-	10	"Solar Radiation"
-	11	"Dew Point"	 - scale: {"C","F"}
-	12	"Rain Rate"	 - scale: {"mm/h","inch/h"}
-	13	"Tide Level"	 - scale: {"m","feet"}
-	14	"Weight"	 - scale: {"kg","pounds"}
-	15	"Voltage"	 - scale: {"V","mV"}
-	16	"Current"	 - scale: {"A","mA"}
-	17	"CO2 Level"
-	18	"Air Flow"	 - scale: {"m3/h","cfm"}
-	19	"Tank Capacity"	 - scale: {"l","cbm","gallons"}
-	20	"Distance"	 - scale: {"m","cm","Feet"}
-	21	"Angle Position"	 - scale: {"%","Degree to North Pole","Degree to South Pole"}
-	22	"Rotation"	 - scale: {"rpm","Hz"}
-	23	"Water temperature"	 - scale: {"C","F"}
-	24	"Soil temperature"	 - scale: {"C","F"}
-	25	"Seismic intensity"	 - scale: {"Mercalli","European Macroseismic","Liedu","Shindo"}
-	26	"Seismic magnitude"	 - scale: {"Local","Moment","Surface wave","Body wave"}
-	27	"Ultraviolet"
-	28	"Electrical resistivity"
-	29	"Electrical conductivity"
-	30	"Loudness"	 - scale: {"Absolute loudness (dB)","A-weighted decibels (dBA)"}
-	31	"Moisture"	 - scale: {"%","Volume water content (m3/m3)","Impedance (kΩ)","Water activity (aw)"}
-	32	"Frequency"	 - scale: {"Hz","kHz"}
-	33	"Time"
-	34	"Target Temperature"	 - scale: {"C","F"}
-	35	"Particulate Matter"	 - scale: {"mol/m3","μg/m3"}
-	36	"Formaldehyde (CH2O)"
-	37	"Radon Concentration"	 - scale: {"bq/m3","pCi/L"}
-	38	"Methane Density (CH4)"
-	39	"Volatile Organic Compound (VOC)"
-	40	"Carbon Monoxide (CO)"
-	41	"Soil Humidity"
-	42	"Soil Reactivity"
-	43	"Soil Salinity"
-	44	"Heart Rate"
-	45	"Blood Pressure"	 - scale: {"Systolic (mmHg)","Diastolic (mmHg)"}
-	46	"Muscle Mass"
-	47	"Fat Mass"
-	48	"Bone Mass"
-	49	"Total Body Water"
-	50	"Basic Metabolic Rate"
-	51	"Body Mass Index"
-	52	"Acceleration￼X-axis"
-	53	"Acceleration￼Y-axis"
-	54	"Acceleration￼Z-axis"
-	55	"Smoke Density"
-  --]]
-  ["50"] = { "D_PowerMeter1.xml", SID.EnergyMetering },   -- device is "D_PowerMeter1.xml"
-  --[[
-  Meter
-    1	"Electric"	 - scale: {"kWh","kVAh","W","Pulse Count","V","A","Power Factor"}
-    2	"Gas"	 - scale: {"Cubic meter","Cubic feet","reserved","Pulse Count"}
-    3	"Water"	 - scale: {"Cubic meter","Cubic feet","US Gallon","Pulse Count"}
-  --]]
-  ["51"] = { nil, SID.Dimming },   -- SWITCH COLOUR
-
-  ["64"] = { "D_HVAC_ZoneThermostat1.xml", SID.HVAC_UserOperatingMode},    -- Thermostat_mode
-    --	Off,Heat,Cool,Auto,Auxiliary,Resume,Fan Only,Furnace,Dry Air,Moist Air,Auto Change Over,
-    --  Energy Save Heat,Energy Save Cool,Away Heat,Away Cool,Full Power,Manufacturer Specific
-  ["66"] = { nil, SID.HVAC_OperatingState }, -- Operating_state
-  ["67"] = { nil, SID.TemperatureSetpoint, -- Setpoint
-    --	Heating,Cooling,Furnace,Dry Air,Moist Air,Auto Change Over,Energy Save Heating,Energy Save Cooling,Away Heating,Away Cooling,Full Power
-    scale = {
-      ["1"]  = { nil, SID.TemperatureSetpoint1_Heat },
-      ["2"]  = { nil, SID.TemperatureSetpoint1_Cool },
-    },
-  },
-
-  ["68"] = {nil, SID.HVAC_FanOperatingMode}, -- ThermostatFanMode
-    --	Auto Low,On Low,Auto High,On High,Auto Medium,On Medium,Circulation,Humidity and circulation,Left and right,Up and down,Quite
-
-  ["98"] = { "D_DoorLock1.xml",   SID.DoorLock },
-
-  ["102"] = { "D_BinaryLight1.xml",  SID.SwitchPower, "D_GarageDoor_Linear.json" },    -- "Barrier Operator"
-  ["113"] = { "D_DoorSensor1.xml", SID.SecuritySensor, "D_DoorSensor1.json",    -- "Alarm Notifications" 
-     scale = {
---  1	"Smoke"
---	2	"CO"     -- "D_SmokeSensor1.xml"
---	3	"CO2"    -- "D_SmokeCoSensor1.json"
---	4	"Heat"
-      ["5"] = { "D_FloodSensor1.xml", SID.SecuritySensor, "D_FloodSensor1.json" }, -- "Water"
-      ["6"] = { "D_DoorSensor1.xml", SID.SecuritySensor, "D_DoorSensor1.json" }, -- "Access Control"
-      ["7"] = { "D_MotionSensor1.xml", SID.SecuritySensor, "D_MotionSensor1.json" }, --	7	"Tamper or generic motion"
---	8	"Power"
---	9	"System"
---  10 "Emergency"
---	11 "Tilt"
---	12 "Motion"
---]]
-    }},
-  ["128"] = { nil, SID.EnergyMetering },
-  ["145"] = { "D_SceneControllerLED1.xml", SID.SceneControllerLED, "D_SceneControllerLED1.json"}, -- Leviton Zone/scene controller proprietary
-  ["152"] = { "D_MotionSensor1.xml", SID.SecuritySensor },
-  ["156"] = { "D_FloodSensor1.xml", SID.SecuritySensor, "D_FloodSensor1.json" },    -- "Old alarm sensor"
-}
-
-for n, cc in pairs (command_class) do
-  CC[n] = {
-    updater = cc,
-    files = vMap[n],
-  }   
-end
 
 --[[
 
@@ -1043,20 +1120,17 @@ CC.meta = function (v)
   local altid, vtype, node, instance, c_class, scale, sub_class, sub_scale, tail = NICS_etc(v)
 
   if node then
---    local x = vMap[c_class] or empty
-    local x = (CC[c_class] or empty) .files or empty
-    local y = (x.scale or {})[scale] or {}
-    local z = setmetatable (y, {__index = x})
+    local generic  = (CC[c_class] or empty) .files or empty
+    local specific = generic[scale] or empty
 
-    local upnp_file = z[1]
-    local service   = z[2]
-    local json_file = z[3]
+    local upnp_file = specific[1] or generic[1]
+    local service   = specific[2] or generic[2]
+    local json_file = specific[3] or generic[3]
 
-    local devtype = (json_file or upnp_file or ''): match "^D_(%u+%l*)"
+    local devtype = (json_file or upnp_file or ''): match "^D_(%u+%l*)"  -- JUST for multi DisplayLine
 
     return {
       name      = v.metrics.title,
-      level     = v.metrics.level,
 
       upnp_file = upnp_file,
       service   = service,
@@ -1075,18 +1149,18 @@ CC.meta = function (v)
   end
 end
 
+local updaters = {}
 
-end -- COMMAND CLASSES
-
-local command_class = {}
-
-function command_class.new (dino, meta)
---  local updater = command_class[meta.c_class] or command_class["0"]
+local function new_updater (id, vDev)
+  local meta = vDev.meta
   local updater = (CC[meta.c_class] or CC["0"]) .updater
-  return function (inst, ...)
+
+  updaters[meta.altid] = function (inst, ...)
     -- call with deviceNo, instance object, and metadata (for persistent data)
-    return updater (dino, inst, meta, ...)
+    return updater (id, inst, meta, ...)
   end
+
+  return meta.upnp_file, meta.json_file, vDev.metrics.title
 end
 
 ----------------------------
@@ -1152,14 +1226,12 @@ end
 
 ---  CONFIGURE DEVICES
 -- optional child parameters forces new vDev children
-local function configureDevice (id, name, ldv, updaters, child)
+local function configureDevice (id, name, ldv, child)
   child = child or {}
   local classes = index_by_command_class (ldv)
 
-  local function add_updater (v)
-    local meta = v.meta
-    updaters[meta.altid] = command_class.new (id, meta)
-    return meta.upnp_file, meta.json_file, v.metrics.title
+  local function add_updater (vDev)
+    return new_updater (id, vDev)
   end
 
   -- determine default device type
@@ -1361,7 +1433,6 @@ local function createChildren (bridgeDevNo, vDevs, room, OFFSET)
   debug(json.encode(room_index))
 
   --  debug(json.encode(zDevs))
-  local updaters = {}
   for nodeInstance, ldv in pairs(zDevs) do
     local n,i = nodeInstance: match  "(%d+)%-(%d+)"
     local ZnodeId = n * 10 + i + OFFSET
@@ -1379,9 +1450,9 @@ local function createChildren (bridgeDevNo, vDevs, room, OFFSET)
     local name = "zNode #" .. nodeInstance
     local altid = nodeInstance
     local upnp_file, json_file
-
-    upnp_file, json_file, name = configureDevice (id, name, ldv, updaters, child)  -- note extra child param
     room = CLONEROOMS and room_index[nodeInstance] or room
+    
+    upnp_file, json_file, name = configureDevice (id, name, ldv, child)  -- note extra child param
     checkDeviceExists (parent, id, name, altid, upnp_file, json_file, room)
 
     -- now any specified child devices...
@@ -1389,13 +1460,10 @@ local function createChildren (bridgeDevNo, vDevs, room, OFFSET)
     for _, vDev in ipairs (ldv) do
       local meta = vDev.meta
       local altid = meta.altid
-      if child[altid] then                                    -- this vDev should be a child device
-        local childId = validOrNewId(altid)                   -- ...with this device number
-        name = vDev.metrics.title                             -- use actual name
-        upnp_file = meta.upnp_file
-        json_file = meta.json_file
+      if child[altid] then                                          -- this vDev should be a child device
+        local childId = validOrNewId(altid)                         -- ...with this device number
+        upnp_file, json_file, name = new_updater (childId, vDev)    -- ...and this specific updater
         checkDeviceExists (id, childId, name, altid, upnp_file, json_file, room)
-        updaters[altid] = command_class.new (childId, meta)   -- create specific updater
         updated_children[#updated_children+1] = altid
       end
     end
@@ -1427,11 +1495,13 @@ end
 -- DEVICE status updates: ZWay => openLuup
 --
 
-local D = {}    -- device structure simply for the HTTP callback diagnostic
+local D = {}    -- latest device structure
 
-function _G.updateChildren (d)
-  D = d or Z.devices () or empty
-  for _,inst in pairs (D) do
+---- this needs to be as fast as possible, since all vDevs are cycled through every update
+local function updateChildren (vDevs)
+  local sid = SID.ZWay
+  local failed = {}
+  for _,inst in pairs (vDevs) do
     local altid, vtype, node, instance = NICS_etc (inst)
     if node then
       local zDevNo = OFFSET + node * 10 + instance    -- determine device number from node and id
@@ -1439,16 +1509,107 @@ function _G.updateChildren (d)
       if zDev then
         -- set all the Vdev variables in the Zwave node devices
         local id = vtype .. altid
-        setVar (id, inst.metrics.level, SID.ZWay, zDevNo)
-        setVar (id .. "_LastUpdate", inst.updateTime, SID.ZWay, zDevNo)
-        setVar ("CommFailure", inst.metrics.isFailed, SID.HaDevice, zDevNo)
+        if getVar (id, sid, zDevNo) then
+          -- fast update of existing variable values (this really does make a difference)
+          local vars = zDev.services[sid].variables
+          vars[id].value = inst.metrics.level
+          vars[id .. "_LastUpdate"].value = inst.updateTime
+        else
+          -- create missing vDev variables (without logging)
+          zDev: variable_set (sid, id, inst.metrics.level)
+          zDev: variable_set (sid, id .. "_LastUpdate", inst.updateTime)
+        end
+
+        failed[zDevNo] = failed[zDevNo] or inst.metrics.isFailed and altid  -- spot failed vDevs
+
         local update = cclass_update [altid]
         if update then update (inst) end
       end
     end
   end
-  luup.call_delay ("updateChildren", POLLRATE)
+
+  -- flag altid of failed variables
+  for dno, state in pairs (failed) do
+    local dev = luup.devices[dno]
+    local status = state and 2 or -1
+    local message = state and state .. " failed" or ''
+    dev: status_set (status, message)
+  end
+
 end
+
+
+
+-- poll remote ZWave.me for changes
+-- two versions: synchronous / asynchronous
+do
+--  local poll_count = 0
+--  local DataVersion = ''
+
+  local log = "ZWay ASYNC callback status: %s, #data: %s"
+  local erm = "ZWay ASYNC request: %s"
+  
+--  local function increment_poll_count ()                        -- 2019.12.12
+--    local every = tonumber (CheckAllEveryNth) or 0
+--    poll_count = poll_count + 1
+--    if every > 0 then poll_count = poll_count % every end       -- wrap every N
+--  end
+  
+  -- original synchronous polling
+  
+  function _G.ZWay_delay_callback ()
+    local vDevs = Z.devices() 
+    if vDevs then updateChildren (vDevs) end 
+    luup.call_delay ("ZWay_delay_callback", POLLRATE)
+  end
+
+  -- asynchronous polling
+
+  local last_async_call
+  
+  function _G.ZWay_async_request ()
+    last_async_call = os.time()
+    debug ("Async request @" .. last_async_call)
+--    increment_poll_count ()
+--    if init == "INIT" or poll_count == 0 then DataVersion = '' end        -- .. and go for the complete list 
+    
+    local url = "/ZAutomation/api/v1/devices"
+    local ok, err = Z.async_request (url, ZWay_async_callback)
+  
+    if not ok then -- we will never be called again, unless we do something about it
+      luup.log (erm: format (tostring(err)))                              -- report error...
+--      POLL_ERRORS = POLL_ERRORS + 1
+      luup.call_delay ("ZWay_async_request", POLLRATE, "INIT")    -- ...and reschedule ourselves to try again
+    end
+  end
+  
+  function _G.ZWay_async_callback (status, response)
+    local delay = POLLRATE
+    debug ("aync callback size: " .. #(response or empty))
+    if status == 200 and response then 
+      local d = json.decode (response)
+      local vDevs = d and d.data and d.data.devices
+      if vDevs then 
+        updateChildren (vDevs) end 
+--        delay = POLL_MINIMUM end                    -- yes, ask for another one soon...
+--        init = ''                                   -- ... without initialising data version
+    else
+      luup.log (log: format (status or '?', #(response or '')))
+    end
+    luup.call_delay ("ZWay_async_request", delay, '')    -- schedule next request
+  end
+
+  local POLL_TIMEOUTS = 0
+  function _G.ZWay_async_watchdog (timeout)
+    if (last_async_call + timeout) < os.time() then
+      POLL_TIMEOUTS = POLL_TIMEOUTS + 1
+      ZWay_async_request ()                     -- throw in another call, just in case we missed one
+    end
+    luup.call_delay ("ZWay_async_watchdog", timeout, timeout)
+  end
+
+end
+
 
 --
 -- Generic ACTIONS
@@ -1511,26 +1672,26 @@ function init (lul_device)
 
 	luup.devices[devNo].action_callback (generic_action)     -- catch all undefined action calls
 
-	POLLRATE = uiVar ("Pollrate", 2)
-  POLLRATE = math.min (tonumber(POLLRATE) or 0, 0.5)
-
---  local user     = uiVar ("Username", "admin")
---	local password = uiVar ("Password", "razberry")
-
+	POLLRATE    = uiVar ("Pollrate", 1, 0.5)            -- minimum value is 0.5 seconds
+  ASYNCPOLL   = uiVar ("AsyncPoll", "false")          -- if true, use ansynchronous polling of ZWave.me H/W
   CLONEROOMS  = uiVar ("CloneRooms", '')              -- if true, clone rooms and place devices there
   NAMEDEVICES = uiVar ("NameDevices", '')             -- if true, copy device names from ZWay
   ZERODIMMER  = uiVar ("ZeroDimmerWhenOff", "true")   -- if true, zero dimmer sliders when off
 
+  ASYNCPOLL   = is_true (ASYNCPOLL)
   CLONEROOMS  = is_true (CLONEROOMS)
   NAMEDEVICES = is_true (NAMEDEVICES)
   ZERODIMMER  = is_true (ZERODIMMER)
 
-  local testfile = uiVar ("Test_JSON_File", '')
+  OFFSET = tonumber (getVar "Offset") or luup.openLuup.bridge.nextIdBlock()
+  setVar ("Offset", OFFSET)
 
   -- Authenticate
   do
+    local testfile = uiVar ("Test_JSON_File", '')
     if testfile ~= '' then
       Z = ZWayVDev_DUMMY_API (testfile)
+      ASYNCPOLL = false                       -- dummy API has no async mode
     else
       local session = getVar "ZWAYSession"
       Z = ZWayVDev_API (ip, session)
@@ -1540,9 +1701,6 @@ function init (lul_device)
 
   setVar ("DisplayLine1", '', SID.AltUI)
   setVar ("DisplayLine2", ip, SID.AltUI)
-
-  OFFSET = tonumber (getVar "Offset") or luup.openLuup.bridge.nextIdBlock()
-  setVar ("Offset", OFFSET)
 
   local status, comment
 
@@ -1567,7 +1725,19 @@ function init (lul_device)
   if ok and ok.data == "OK" then
     local vDevs = Z.devices ()
     cclass_update = createChildren (devNo, vDevs, room_number, OFFSET)
-    _G.updateChildren (vDevs)
+    updateChildren (vDevs)
+
+    if ASYNCPOLL then
+      local AsyncTimeout = 30
+      _log "Asynchronous polling"
+      ZWay_async_request "INIT"
+      ZWay_async_watchdog (AsyncTimeout)
+    else
+      _log "Synchronous polling"
+      ZWay_delay_callback ()
+    end
+    luup.set_failure (0)                        -- all's well with the world
+
   else
     luup.set_failure (2, devNo)	        -- authorisation failure
     setVar ("DisplayLine1", 'Login required', SID.AltUI)
