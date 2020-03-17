@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 ABOUT = {
   NAME          = "L_ZWay2",
-  VERSION       = "2020.03.16",
+  VERSION       = "2020.03.16b",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2020 AKBooer",
@@ -56,8 +56,6 @@ local ltn12   = require "ltn12"
 
 local empty = setmetatable ({}, {__newindex = function() error ("read-only", 2) end})
 
-------------------
-
 local function _log(text, level)
 	luup.log(("%s: %s"): format ("ZWay", text), (level or 50))
 end
@@ -92,7 +90,7 @@ local function ZWayVDev_API (ip, sid)
       sink = ltn12.sink.table(response_body)
     }
   end
-  
+
   local function build_response (url, status, response_body)
     local json_response = table.concat (response_body)
     if status ~= 200 then
@@ -101,13 +99,13 @@ local function ZWayVDev_API (ip, sid)
     end
     return status, json_response
   end
-  
+
   local function HTTP_request (url, body)
     local response_body = {}
     local _, status = http.request (build_request (url, body, response_body))
     return build_response (url, status, response_body)
   end
-  
+
   local function HTTP_async_request (url, body_or_callback, callback)
     local response_body = {}
     local body = callback and body_or_callback or nil
@@ -203,9 +201,9 @@ local function ZWayVDev_DUMMY_API (filename)
   local f = assert (io.open (filename), "TEST filename not found")
   local J = f: read "*a"
   f: close()
-  
+
   local D = json.decode (J)
-    
+
   if D then
     return {
       request = noop,
@@ -217,8 +215,6 @@ local function ZWayVDev_DUMMY_API (filename)
 }
   end
 end
-
-------------------
 
 
 local Z         -- the Zway API object
@@ -245,7 +241,6 @@ local DEV = setmetatable ({
     controller  = "D_SceneController1.xml",
     combo       = "D_ComboDevice1.xml",
     rgb         = "D_DimmableRGBLight1.xml",
-  
   -- D_Siren1.xml
   -- D_SmokeSensor1.xml
 
@@ -254,9 +249,9 @@ local DEV = setmetatable ({
 
 
 local KnownSID = {          -- list of all implemented serviceIds
-  
+
     "urn:akbooer-com:serviceId:ZWay1",
-    
+
     "urn:micasaverde-com:serviceId:Camera1",
     "urn:micasaverde-com:serviceId:Color1",
     "urn:micasaverde-com:serviceId:ComboDevice1",
@@ -272,7 +267,7 @@ local KnownSID = {          -- list of all implemented serviceIds
     "urn:micasaverde-com:serviceId:SecuritySensor1",
     "urn:micasaverde-com:serviceId:WindowCovering1",
     "urn:micasaverde-com:serviceId:ZWaveNetwork1",
-    
+
     "urn:upnp-org:serviceId:Dimming1",
     "urn:upnp-org:serviceId:FanSpeed1",
     "urn:upnp-org:serviceId:HVAC_FanOperatingMode1",
@@ -389,9 +384,9 @@ local function rev_open_or_close (x)
   return y[x] or x
 end
 
--- make either "1" or "true" work the same way
+-- make either "1" or "true" or true work the same way
 local function is_true (flag)
-  local y = {["true"] = true, ["1"] = true}
+  local y = {["true"] = true, ["1"] = true, [true] = true}
   return y [flag]
 end
 
@@ -455,7 +450,7 @@ SRV.Dimming = {
       local level = tostring (args.newLoadlevelTarget or 0)
       local off = level == '0'
       local class = "-38"
-      
+
       luup.variable_set (SID.SwitchPower, "Target", off and '0' or '1', d)
       luup.variable_set (SID.Dimming, "OnEffectLevel", level, d)
       luup.variable_set (SID.Dimming, "LoadLevelTarget", level, d)
@@ -486,13 +481,23 @@ SRV.HaDevice = {
       local id, inst = altid: match (NIaltid)
       Z.zwcommand(id, inst, cc, cmd)
     end,
+
+    SendConfig = function (d,args)
+      local cc = 112
+      local par,cmd,sz = args.parameter, args.command, args.size or 0
+      local data = "Set(%s,%s,%s)"
+      data = data: format(par,cmd,sz)
+      local altid = luup.devices[d].id
+      local id, inst = altid: match (NIaltid)
+      Z.zwcommand(id, inst, cc, data)
+    end,
   }
 
 
 SRV.TemperatureSensor = {
-    
+
     GetCurrentTemperature = {returns = {CurrentTemp = "CurrentTemperature"}},
-  
+
   }
 
 
@@ -708,10 +713,9 @@ SRV.TemperatureSetpoint = {
     GetCurrentSetpoint  = {returns = {CurrentSP  = "CurrentSetpoint"}},
     GetSetpointAchieved = {returns = {CurrentSPA = "SetpointAchieved"}},
 
-    SetCurrentSetpoint = function (...) 
-      return SetCurrentSetpoint (SID.TemperatureSetpoint, ...) 
+    SetCurrentSetpoint = function (...)
+      return SetCurrentSetpoint (SID.TemperatureSetpoint, ...)
     end
-    
 }
 
 local function shallow_copy (x)
@@ -723,14 +727,15 @@ end
 -- these copies MUST be separate tables, since they're used to index the SID table
 SRV.TemperatureSetpoint1_Heat = shallow_copy (SRV.TemperatureSetpoint)
 
-SRV.TemperatureSetpoint1_Heat.SetCurrentSetpoint = function (...) 
-  return SetCurrentSetpoint (SID.TemperatureSetpoint1_Heat, ...) 
+SRV.TemperatureSetpoint1_Heat.SetCurrentSetpoint = function (...)
+  return SetCurrentSetpoint (SID.TemperatureSetpoint1_Heat, ...)
+
 end
 
 SRV.TemperatureSetpoint1_Cool = shallow_copy (SRV.TemperatureSetpoint)
 
-SRV.TemperatureSetpoint1_Cool.SetCurrentSetpoint = function (...) 
-  return SetCurrentSetpoint (SID.TemperatureSetpoint1_Cool, ...) 
+SRV.TemperatureSetpoint1_Cool.SetCurrentSetpoint = function (...)
+  return SetCurrentSetpoint (SID.TemperatureSetpoint1_Cool, ...)
 end
 
 
@@ -745,7 +750,7 @@ end
 --
 
 local CC = {   -- command class object
-  
+
   -- catch-all
   ["0"] = {
     updater = function (d, inst, meta)
@@ -780,7 +785,7 @@ local CC = {   -- command class object
     updater = function (d, inst, meta)
       setVar ("Status",on_or_off (inst.metrics.level), meta.service, d)
     end,
-    
+
     files = { "D_BinaryLight1.xml", SID.SwitchPower },
   },
 
@@ -801,11 +806,11 @@ local CC = {   -- command class object
     updater = function (d, inst)
       d, inst = d, inst
     end,
-    
+
      -- Leviton Zone/scene controller
     files = { "D_SceneControllerLED1.xml", SID.SceneControllerLED, "D_SceneControllerLED1.json"},
   },
-  
+
   -- binary sensor
   ["48"] = {
     updater = function (d, inst)
@@ -917,9 +922,13 @@ local CC = {   -- command class object
     updater = function (d, inst, meta)
     local var = (inst.metrics.scaleTitle or '?'): upper ()
     local translate = {W = "Watts", A = "Amps", V = "Volts"}      -- 2020.02.10 thanks @rafale77
-    if var then setVar (translate[var] or var, inst.metrics.level, meta.service, d) end
+    if var then
+    setVar (translate[var] or var, inst.metrics.level, meta.service, d)
+      if var == "KWH" then
+        setVar ("KWHReading", inst.updateTime, meta.service, d)
+      end
+    end
   end,
-
   files = { "D_PowerMeter1.xml", SID.EnergyMetering },   -- device is "D_PowerMeter1.xml"
   --[[
   Meter
@@ -927,13 +936,13 @@ local CC = {   -- command class object
     2	"Gas"	 - scale: {"Cubic meter","Cubic feet","reserved","Pulse Count"}
     3	"Water"	 - scale: {"Cubic meter","Cubic feet","US Gallon","Pulse Count"}
   --]]
-  
+
   },
 
   -- switch color
   ["51"] = {
     updater = function () end,
-    files = {nil, SID.Dimming },   
+    files = {nil, SID.Dimming },
   },
 
   -- thermostat mode
@@ -945,7 +954,7 @@ local CC = {   -- command class object
       --  Energy Save Heat,Energy Save Cool,Away Heat,Away Cool,Full Power,Manufacturer Specific.
       -- Vera modes:
   --[[
-      local ZtoV = {Off = "Off", Heat = "HeatOn", Cool = "CoolOn", Auto = "AutoChangeOver", 
+      local ZtoV = {Off = "Off", Heat = "HeatOn", Cool = "CoolOn", Auto = "AutoChangeOver",
         ["Auto Change Over"] = "AutoChangeOver"}
       local level = inst.metrics.level
       setVar ("ModeStatus", ZtoV[level] or level, meta.service, d)
@@ -961,7 +970,7 @@ local CC = {   -- command class object
 
   files = { nil, SID.HVAC_OperatingState },
   },
-  
+
   ["67"] = {
     updater = function (d, inst, meta)       -- Setpoint
       --	Heating,Cooling,Furnace,Dry Air,Moist Air,Auto Change Over,Energy Save Heating,Energy Save Cooling,Away Heating,Away Cooling,Full Power
@@ -976,7 +985,7 @@ local CC = {   -- command class object
         setVar ("CurrentSetpoint", inst.metrics.level, sid, d)      -- 2020.02.10, thanks @rafale77
       end
     end,
-  
+
   files = { nil, SID.TemperatureSetpoint, -- Setpoint
       ["1"]  = { nil, SID.TemperatureSetpoint1_Heat },
       ["2"]  = { nil, SID.TemperatureSetpoint1_Cool },
@@ -985,7 +994,7 @@ local CC = {   -- command class object
 
   -- ThermostatFanMode
   ["68"] = {
-    updater = function (d, inst)       
+    updater = function (d, inst)
       d, inst = d, inst
       --	Auto Low,On Low,Auto High,On High,Auto Medium,On Medium,Circulation,Humidity and circulation,Left and right,Up and down,Quiet
     end,
@@ -993,16 +1002,16 @@ local CC = {   -- command class object
   files = {nil, SID.HVAC_FanOperatingMode},
   },
 
-
   -- door lock
   ["98"] = {
     updater = function (d, inst)
-      setVar ("Status",open_or_close (inst.metrics.level), SID.DoorLock, d)
+      local status = open_or_close (inst.metrics.level)
+      setVar ("Status", status, SID.DoorLock, d)
+      setVar ("Tripped", status, SID.SecuritySensor, d)
     end,
-    
+
     files = { "D_DoorLock1.xml",   SID.DoorLock },
   },
-
 
   -- barrier operator (eg. garage door)
   ["102"] = {
@@ -1018,8 +1027,8 @@ local CC = {   -- command class object
   -- Alarm / Notification
   ["113"] = {
     updater = nil,      -- shared with CC#48 (see below)
-    
-    files = { "D_DoorSensor1.xml", SID.SecuritySensor, "D_DoorSensor1.json",    
+
+    files = { "D_DoorSensor1.xml", SID.SecuritySensor, "D_DoorSensor1.json",
   --  1	"Smoke"
   --	2	"CO"     -- "D_SmokeSensor1.xml"
   --	3	"CO2"    -- "D_SmokeCoSensor1.json"
@@ -1035,7 +1044,7 @@ local CC = {   -- command class object
   --]]
     },
   },
-  
+
   -- battery
   ["128"] = {
     updater = function (d, inst)
@@ -1044,24 +1053,24 @@ local CC = {   -- command class object
       setVar ("BatteryLevel", level, SID.HaDevice, d)
       setVar ("sl_BatteryAlarm", warning, SID.HaDevice, d)
     end,
-    
+
     files = { nil, SID.EnergyMetering },
   },
 
   -- Manufacturer proprietary
-  -- Leviton Zone/scene controller 
+  -- Leviton Zone/scene controller
   ["145"] = {
     updater = function () end,
-    
-    files =  { "D_SceneControllerLED1.xml", SID.SceneControllerLED, "D_SceneControllerLED1.json"}, 
+
+    files =  { "D_SceneControllerLED1.xml", SID.SceneControllerLED, "D_SceneControllerLED1.json"},
   },
-  
+
   ["152"] = {
     updater = function () end,
-  
+
     files = { "D_MotionSensor1.xml", SID.SecuritySensor },
   },
-  
+
   -- deprecated alarm
   ["156"] = {
     updater = nil,      -- shared with CC#48 (see below)
@@ -1074,7 +1083,6 @@ local CC = {   -- command class object
 
 CC ["113"].updater = CC ["48"].updater      -- alarm
 CC ["156"].updater = CC ["48"].updater      -- tamper switch (deprecated)
-
 
 
 ----------------------------------------------------
@@ -1265,6 +1273,14 @@ local function configureDevice (id, name, ldv, child)
     -- command_class ["68"] Fan_mode
     local tstat = classes["64"][1]
     upnp_file, json_file, name = add_updater (tstat)
+    local ops = classes["66"]  -- operating state
+    if ops then
+      add_updater(ops[1])
+    end
+    local fst = classes["69"]  -- fan state
+    if fst then
+      add_updater(fst[1])
+    end
     local fmode = classes["68"]
     if fmode then
       add_updater(fmode[1])              -- TODO: extra fan modes
@@ -1280,11 +1296,29 @@ local function configureDevice (id, name, ldv, child)
 --    name = "rgb #" .. id
 
   elseif ((classes["37"] and #classes["37"] == 1)             -- ... just one switch
-  or      (classes["38"] and #classes["38"] == 1) )           -- ... OR just one dimmer
-  and not classes["49"] then                                  -- ...but NOT any sensors
-    local v = (classes["38"] or empty)[1] or classes["37"][1]  -- then go for the dimmer
-    upnp_file, json_file, name = add_updater(v)
-
+  or      (classes["38"] and #classes["38"] == 1) ) then         -- ... OR just one dimmer
+    if not classes["49"] and not classes ["113"] then             -- ...but NOT any sensors
+      local v = (classes["38"] or empty)[1] or classes["37"][1]
+      upnp_file, json_file, name = add_updater(v)
+    else
+      local v = (classes["38"] or classes["37"]) [1]
+      local meta = v.meta
+      name = table.concat {"multi #", meta.node, '-', meta.instance}
+      local types = {["Switch"] = 1}
+       child[v.meta.altid] = true                            -- force child creation
+      for _, v in ipairs (classes["113"] or empty) do    -- add motion sensors
+        if v.meta.sub_class ~= "3" and v.meta.scale ~= "8" then         -- not a tamper switch or low battery notification
+          v.meta.upnp_file = DEV.motion
+          types["Alarm"] = (types["Alarm"] or 0) + 1
+          child[v.meta.altid] = true                            -- force child creation
+        end
+      end
+      local display = {}
+      for s in pairs (types) do display[#display+1] = s end
+      table.sort(display)
+      for i,s in ipairs (display) do display[i] = table.concat {s,':',types[s], ' '} end
+      luup.variable_set (SID.AltUI, "DisplayLine1", table.concat (display), id)
+    end
   elseif classes["48"] and #classes["48"] == 1                -- ... just one alarm
   and not classes["49"] then                                  -- ...and no sensors
 --  and    classes["49"] and #classes["49"] <= 1 then           -- ...and max only one sensor
@@ -1451,7 +1485,7 @@ local function createChildren (bridgeDevNo, vDevs, room, OFFSET)
     local altid = nodeInstance
     local upnp_file, json_file
     room = CLONEROOMS and room_index[nodeInstance] or room
-    
+
     upnp_file, json_file, name = configureDevice (id, name, ldv, child)  -- note extra child param
     checkDeviceExists (parent, id, name, altid, upnp_file, json_file, room)
 
@@ -1499,7 +1533,6 @@ local D = {}    -- latest device structure
 
 ---- this needs to be as fast as possible, since all vDevs are cycled through every update
 local function updateChildren (vDevs)
-  D = vDevs               -- just for monitoring (/data_request?id=lr_znnn)
   local sid = SID.ZWay
   local failed = {}
   for _,inst in pairs (vDevs) do
@@ -1549,49 +1582,49 @@ do
 
   local log = "ZWay ASYNC callback status: %s, #data: %s"
   local erm = "ZWay ASYNC request: %s"
-  
+
 --  local function increment_poll_count ()                        -- 2019.12.12
 --    local every = tonumber (CheckAllEveryNth) or 0
 --    poll_count = poll_count + 1
 --    if every > 0 then poll_count = poll_count % every end       -- wrap every N
 --  end
-  
+
   -- original synchronous polling
-  
+
   function _G.ZWay_delay_callback ()
-    local vDevs = Z.devices() 
-    if vDevs then updateChildren (vDevs) end 
+    local vDevs = Z.devices()
+    if vDevs then updateChildren (vDevs) end
     luup.call_delay ("ZWay_delay_callback", POLLRATE)
   end
 
   -- asynchronous polling
 
   local last_async_call
-  
+
   function _G.ZWay_async_request ()
     last_async_call = os.time()
     debug ("Async request @" .. last_async_call)
 --    increment_poll_count ()
---    if init == "INIT" or poll_count == 0 then DataVersion = '' end        -- .. and go for the complete list 
-    
+--    if init == "INIT" or poll_count == 0 then DataVersion = '' end        -- .. and go for the complete list
+
     local url = "/ZAutomation/api/v1/devices"
     local ok, err = Z.async_request (url, ZWay_async_callback)
-  
+
     if not ok then -- we will never be called again, unless we do something about it
       luup.log (erm: format (tostring(err)))                              -- report error...
 --      POLL_ERRORS = POLL_ERRORS + 1
       luup.call_delay ("ZWay_async_request", POLLRATE, "INIT")    -- ...and reschedule ourselves to try again
     end
   end
-  
+
   function _G.ZWay_async_callback (status, response)
     local delay = POLLRATE
     debug ("aync callback size: " .. #(response or empty))
-    if status == 200 and response then 
+    if status == 200 and response then
       local d = json.decode (response)
       local vDevs = d and d.data and d.data.devices
-      if vDevs then 
-        updateChildren (vDevs) end 
+      if vDevs then
+        updateChildren (vDevs) end
 --        delay = POLL_MINIMUM end                    -- yes, ask for another one soon...
 --        init = ''                                   -- ... without initialising data version
     else
@@ -1643,11 +1676,12 @@ function _G.Login (p)
   end
 end
 
+
 --SendData
 function SendData (p)
   debug (json.encode(p))
   local node, data = p.Node, p.Data
-  if node and data then 
+  if node and data then
     Z.zwsend (node, data)
   end
 end
@@ -1674,7 +1708,7 @@ function init (lul_device)
 	luup.devices[devNo].action_callback (generic_action)     -- catch all undefined action calls
 
 	POLLRATE    = uiVar ("Pollrate", 1, 0.5)            -- minimum value is 0.5 seconds
-  ASYNCPOLL   = uiVar ("AsyncPoll", "true")           -- if true, use ansynchronous polling of ZWave.me H/W
+  ASYNCPOLL   = uiVar ("AsyncPoll", "false")          -- if true, use ansynchronous polling of ZWave.me H/W
   CLONEROOMS  = uiVar ("CloneRooms", '')              -- if true, clone rooms and place devices there
   NAMEDEVICES = uiVar ("NameDevices", '')             -- if true, copy device names from ZWay
   ZERODIMMER  = uiVar ("ZeroDimmerWhenOff", "true")   -- if true, zero dimmer sliders when off
@@ -1744,7 +1778,7 @@ function init (lul_device)
     setVar ("DisplayLine1", 'Login required', SID.AltUI)
     status, comment = false, "Failed to authenticate"
   end
-  
+
   return status, comment, ABOUT.NAME
 
 end
