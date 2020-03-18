@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 ABOUT = {
   NAME          = "L_ZWay2",
-  VERSION       = "2020.03.16b",
+  VERSION       = "2020.03.17",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2020 AKBooer",
@@ -1568,6 +1568,12 @@ local function updateChildren (vDevs)
     local status = state and 2 or -1
     local message = state and state .. " failed" or ''
     dev: status_set (status, message)
+    if state then
+      dev: variable_set (SID.HaDevice, "CommFailure", 1)
+      dev: variable_set (SID.HaDevice, "CommFailureTime", os.time())
+    else
+      dev: variable_set (SID.HaDevice, "CommFailure", 0)
+    end		
   end
 
 end
