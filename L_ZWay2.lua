@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 ABOUT = {
   NAME          = "L_ZWay2",
-  VERSION       = "2020.03.21",
+  VERSION       = "2020.03.22",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2020 AKBooer",
@@ -818,13 +818,11 @@ local CC = {   -- command class object
       local tripped = on_or_off (inst.metrics.level)
       local old = getVar ("Tripped", sid, d)
       local armed = getVar ("Armed", sid, d)
+      local armtrip = false
       setVar ("Tripped", tripped, sid, d)
       if tripped == "1" and tripped ~= old then setVar ("LastTrip", os.time(), sid, d) end
-      if armed == "1" and tripped == "1" then
-        setVar ("ArmedTripped", "1" , sid, d)
-      else
-        setVar ("ArmedTripped", "0" , sid, d)
-      end
+      if armed == "1" and tripped == "1" then armtrip = true end
+      setVar ("ArmedTripped", armtrip and "1" or "0" , sid, d)
     end,
 
     files = { "D_MotionSensor1.xml", SID.SecuritySensor,        -- SensorBinary
@@ -1054,6 +1052,7 @@ local CC = {   -- command class object
       local level = tonumber (inst.metrics.level)
       local warning = (level < 10) and "1" or "0"
       setVar ("BatteryLevel", level, SID.HaDevice, d)
+      setVar ("BatteryDate", inst.updateTime, SID.HaDevice, d)	
       setVar ("sl_BatteryAlarm", warning, SID.HaDevice, d)
     end,
 
