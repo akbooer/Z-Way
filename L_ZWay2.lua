@@ -1033,7 +1033,7 @@ local CC = {   -- command class object
   ["113"] = {
     updater = nil,      -- shared with CC#48 (see below)
 
-    files = { "D_DoorSensor1.xml", SID.SecuritySensor, "D_DoorSensor1.json",
+    files = { "D_MotionSensor1.xml", SID.SecuritySensor,
         ["1"] = { "D_SmokeSensor1.xml", nil, "D_SmokeSensor1.json" },     -- "Smoke"
       	["2"] =	{ "D_SmokeSensor1.xml", nil, "D_COSensor1.json" },        -- "CO"
       	["3"]	= { "D_SmokeSensor1.xml", nil, "D_COSensor1.json" },      -- "CO2"
@@ -1078,7 +1078,7 @@ local CC = {   -- command class object
   ["156"] = {
     updater = nil,      -- shared with CC#48 (see below)
 
-    files = { "D_FloodSensor1.xml", SID.SecuritySensor, "D_FloodSensor1.json" },
+    files = { "D_MotionSensor1.xml", SID.SecuritySensor },
   },
 
 }
@@ -1317,7 +1317,7 @@ local function configureDevice (id, name, ldv, child)
       upnp_file, json_file, name = add_updater(v)
     else
       -- or multi WITH sensors
-      -- @rafale77, pill request #17 was for DesT’s GE combo device
+      -- @rafale77, pull request #17 was for DesT’s GE combo device
       -- a light switch with a motion sensor…
       -- It was reporting two additional instances which don’t appear to be functional.
       local meta = (classes["38"] or classes["37"]) [1] .meta
