@@ -23,7 +23,7 @@ ABOUT = {
   See the License for the specific language governing permissions and
   limitations under the License.
 ]]
-}v
+}
 
 -- 2017.10.03  added test_from_file function
 
@@ -193,15 +193,15 @@ local function ZWayAPI (ip, sid)
 
     -- Z-Wave Device API
     zDevAPI = {
-        controller = function () 
+        controller = function ()
           local status, response = request "/ZWaveAPI/Run/zway.controller"
-          return status, json.decode (response) 
+          return status, json.decode (response)
         end,
       },
 
     -- Virtual Device API
     vDevAPI = {},
-    
+
     -- JavaScript API
     JSAPI = {},
 
@@ -607,7 +607,44 @@ SRV.SceneControllerLED = {
 
  }
 
-SRV.WindowCovering  = { }
+SRV.WindowCovering  = { 
+---------------
+-- 2020.03.25   rafale77 Additions
+--
+Up = function (d)
+
+  local off = level == '0'
+  local class = "-38"
+
+  luup.variable_set (SID.SwitchPower, "Target", '1', d)
+  luup.variable_set (SID.Dimming, "LoadLevelTarget", '1', d)
+
+  local altid = luup.devices[d].id
+  altid = altid: match (NIaltid) and altid..class or altid
+  Z.command (altid, "up")
+end,
+
+Down = function (d)
+  local class = "-38"
+  luup.variable_set (SID.SwitchPower, "Target", '0', d)
+  luup.variable_set (SID.Dimming, "LoadLevelTarget", 0, d)
+
+  local altid = luup.devices[d].id
+  altid = altid: match (NIaltid) and altid..class or altid
+  Z.command (altid, "down")
+end,
+
+Stop = function (d)
+  local class = "-38"
+  luup.variable_set (SID.SwitchPower, "Target", '1', d)
+  luup.variable_set (SID.Dimming, "LoadLevelTarget", '1', d)
+
+  local altid = luup.devices[d].id
+  altid = altid: match (NIaltid) and altid..class or altid
+  Z.command (altid, "stop")
+end,
+
+}
 SRV.Unknown         = { }   -- "catch-all" service
 
 
@@ -1068,7 +1105,7 @@ local CC = {   -- command class object
       local level = tonumber (inst.metrics.level)
       local warning = (level < 10) and "1" or "0"
       setVar ("BatteryLevel", level, SID.HaDevice, d)
-      setVar ("BatteryDate", inst.updateTime, SID.HaDevice, d)	
+      setVar ("BatteryDate", inst.updateTime, SID.HaDevice, d)
       setVar ("sl_BatteryAlarm", warning, SID.HaDevice, d)
     end,
 
@@ -1770,7 +1807,7 @@ function init (lul_device)
 
   -- Authenticate
   local Remote_ID = 31415926
-  
+
   do
     local testfile = uiVar ("Test_JSON_File", '')
     if testfile ~= '' then
@@ -1786,7 +1823,7 @@ function init (lul_device)
       _log ("HomeId: " .. id)
     end
   end
-  
+
   setVar ("Remote_ID", Remote_ID, SID.bridge)         -- 2020.02.12   use as unique remote ID
   local room_name = "ZWay-" .. Remote_ID              -- make sure room exists
   local room_number = luup.rooms.create (room_name)   -- may already exist
@@ -1809,7 +1846,7 @@ function init (lul_device)
 
     luup.set_failure (0, devNo)	        -- openLuup is UI7 compatible
     status, comment = true, "OK"
-    
+
     -- create devices
     local vDevs = Z.devices ()
     cclass_update = createChildren (devNo, vDevs, room_number, OFFSET)
