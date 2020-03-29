@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 ABOUT = {
   NAME          = "L_ZWay2",
-  VERSION       = "2020.03.26",
+  VERSION       = "2020.03.29",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2020 AKBooer",
@@ -47,6 +47,7 @@ ABOUT = {
 -- 2020.03.12  complete restructure in progress...
 -- 2020.03.16  continued refactoring ... including asynchronous HTTP requests
 -- 2020.03.23  improve thermostat recognition (thanks @ronluna)
+-- 2020.03.29  fix handling of missing class #67 in thermostats (thanks @ronluna)
 
 
 local json    = require "openLuup.json"
@@ -1346,7 +1347,7 @@ local function configureDevice (id, name, ldv, child)
     if ops then
       add_updater(ops[1])
     end
-    for _, setpoint in ipairs (classes["67"]) do    -- Setpoints
+    for _, setpoint in ipairs (classes["67"] or empty) do    -- Setpoints
       add_updater(setpoint)
     end
     local fmode = classes["68"]                     -- Fan mode
@@ -1797,6 +1798,7 @@ function init (lul_device)
         id = id.data.homeId.value
         id = ("%08x"): format(id): sub (-8,-1)  -- convert to 32-bit hex
         _log ("HomeId: " .. id)
+        --TODO: set Remote_ID, but first need to check Historian for alphanumeric node numbers
       end
     end
   end
