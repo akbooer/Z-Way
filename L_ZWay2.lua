@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 ABOUT = {
   NAME          = "L_ZWay2",
-  VERSION       = "2020.03.29",
+  VERSION       = "2020.03.30",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2020 AKBooer",
@@ -48,7 +48,6 @@ ABOUT = {
 -- 2020.03.16  continued refactoring ... including asynchronous HTTP requests
 -- 2020.03.23  improve thermostat recognition (thanks @ronluna)
 -- 2020.03.29  fix handling of missing class #67 in thermostats (thanks @ronluna)
-
 
 local json    = require "openLuup.json"
 local chdev   = require "openLuup.chdev"      -- NOT the same as the luup.chdev module! (special create fct)
@@ -283,10 +282,10 @@ local KnownSID = {          -- list of all implemented serviceIds
     "urn:micasaverde-com:serviceId:SceneController1",
     "urn:micasaverde-com:serviceId:SceneControllerLED1",
     "urn:micasaverde-com:serviceId:SecuritySensor1",
-    "urn:micasaverde-com:serviceId:WindowCovering1",
     "urn:micasaverde-com:serviceId:ZWaveNetwork1",
 
     "urn:upnp-org:serviceId:Dimming1",
+    "urn:upnp-org:serviceId:WindowCovering1",
     "urn:upnp-org:serviceId:FanSpeed1",
     "urn:upnp-org:serviceId:HVAC_FanOperatingMode1",
     "urn:upnp-org:serviceId:HVAC_UserOperatingMode1",
@@ -613,36 +612,30 @@ SRV.WindowCovering  = {
 -- 2020.03.25   rafale77 Additions
 --
 Up = function (d)
-
---  local off = level == '0'
-  local class = "-38"
-
   luup.variable_set (SID.SwitchPower, "Target", '1', d)
   luup.variable_set (SID.Dimming, "LoadLevelTarget", "100", d)
 
   local altid = luup.devices[d].id
-  altid = altid: match (NIaltid) and altid..class or altid
+  altid = altid: match (NIaltid) and altid.."-38" or altid
   Z.command (altid, "up")
 end,
 
 Down = function (d)
-  local class = "-38"
   luup.variable_set (SID.SwitchPower, "Target", '0', d)
   luup.variable_set (SID.Dimming, "LoadLevelTarget", '0', d)
 
   local altid = luup.devices[d].id
-  altid = altid: match (NIaltid) and altid..class or altid
+  altid = altid: match (NIaltid) and altid.."-38" or altid
   Z.command (altid, "down")
 end,
 
 Stop = function (d)
-  local class = "-38"
   luup.variable_set (SID.SwitchPower, "Target", '1', d)
   local val =  luup.variable_get (SID.Dimming, "LoadLevelStatus", d)
   luup.variable_set (SID.Dimming, "LoadLevelTarget", val, d)
 
   local altid = luup.devices[d].id
-  altid = altid: match (NIaltid) and altid..class or altid
+  altid = altid: match (NIaltid) and altid.."-38" or altid
   Z.command (altid, "stop")
 end,
 
