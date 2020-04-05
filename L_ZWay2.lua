@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 ABOUT = {
   NAME          = "L_ZWay2",
-  VERSION       = "2020.03.31",
+  VERSION       = "2020.04.05",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2020 AKBooer",
@@ -57,7 +57,7 @@ local chdev   = require "openLuup.chdev"      -- NOT the same as the luup.chdev 
 local async   = require "openLuup.http_async"
 local http    = require "socket.http"
 local ltn12   = require "ltn12"
-
+local bit     = require "bit"
 local empty = setmetatable ({}, {__newindex = function() error ("read-only", 2) end})
 
 local function _log(text, level)
@@ -388,9 +388,9 @@ end
 -- return "1"  or "0"   or "on" or "off"
 local function on_or_off (x)
   local y = {
-    ["on"] = "1", ["off"] = "0", 
-    ["1"] = "on", ["0"] = "off", 
-    [1] = "on", [0] = "off", 
+    ["on"] = "1", ["off"] = "0",
+    ["1"] = "on", ["0"] = "off",
+    [1] = "on", [0] = "off",
     [true] = "on"}
   local z = tonumber (x)
   local on = z and z > 0
@@ -399,7 +399,7 @@ end
 
 local function open_or_close (x)
   local y = {
-    ["open"] = "0", ["close"] = "1", 
+    ["open"] = "0", ["close"] = "1",
     ["0"] = "open", ["1"] = "close",
     [0] = "open", [1] = "close"}
   return y[x] or x
@@ -407,7 +407,7 @@ end
 
 local function rev_open_or_close (x)
   local y = {
-    ["open"] = "1", ["close"] = "0", 
+    ["open"] = "1", ["close"] = "0",
     ["1"] = "open", ["0"] = "close",
     [1] = "open", [0] = "close"}
   return y[x] or x
@@ -595,6 +595,23 @@ SRV.GenericSensor         = { }
 SRV.HumiditySensor        = { }
 SRV.LightSensor           = { }
 
+local function btn_val(button, color)
+  local tot = 0
+  for i=0,16 do
+    if (bit.band(2^i, color) ~= 0) then  tot = tot + (2 ^ (button-1) * 2 ^ (4*(i))) end
+  end
+  return tot
+end
+
+local function ledbitvalue(ls, button)
+  for v=3,1,-1 do
+    b = btn_val(button,v)
+    local val = bit.band(b, ls)
+    return val
+  end
+  return 0
+end
+
 SRV.SceneControllerLED = {
 
   SetLight = function (d, args)
@@ -602,18 +619,17 @@ SRV.SceneControllerLED = {
     local id = altid: match (NIaltid)
     local cc = 145     --command class
     local color = tonumber(args.newValue)
-    local indicator = args.Indicator
+    local indicator = tonumber(args.Indicator)
     local data = "[%s,0,29,13,1,255,%s,0,0,10]"
-    local ItoL = {["1"] = 1, ["2"] = 2, ["3"] = 4, ["4"] = 8, ["5"] = 15}
-    local led = ItoL[indicator]
-    if led then
-      local bit_lshift_led = led * 16                 --bit.lshift(led,4)
-      if color == 2 then led = bit_lshift_led
-      elseif color == 3 then led = led + bit_lshift_led
-      elseif color == 0 then led = 0
-      end
+    local curled = luup.variable_get(SID.SceneControllerLED, "LightSettings", d) or 0
+    local oldled = ledbitvalue(curled,indicator)
+    local led = btn_value(indicator, color)
+    local newled = curled-oldled+led
+    if indicator == 5 then newled = btn_value(1, color)+btn_value(2, color)+btn_value(3, color)+btn_value(4, color) end
+    if newled <= 255 then
       data = data: format(cc,led)
       Z.zwsend(id,data)
+      luup.variable_set(SID.SceneControllerLED, "LightSettings", newled, d)
     end
   end,
 
