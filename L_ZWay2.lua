@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 ABOUT = {
   NAME          = "L_ZWay2",
-  VERSION       = "2020.05.12",
+  VERSION       = "2020.07.12",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2020 AKBooer",
@@ -35,10 +35,6 @@ ABOUT = {
 -- 2020.02.10  fixed meter variable names, thanks @rafale77
 --             ditto, CurrentSetpoint in command class 67
 --             see: https://community.getvera.com/t/zway-plugin/212312/40
--- 2020.05.11  don't disable devices in Room101 (because they weren't enabled when restored.  Thanks @kfxo)
---             see: https://smarthome.community/topic/111/all-z-way-devices-disabled-attribute-is-set-to-1
--- 2020.05.12  add command class 1 updater for ZWave.me battery switch, thanks @ArcherS
---             see: https://smarthome.community/topic/113/changing-device-type-for-wall-controller
 
 -----------------
 
@@ -55,8 +51,12 @@ ABOUT = {
 -- 2020.03.30  @rafale77, pull request#24, fix Window Covering Service
 -- 2020.03.31  fix x_or_y() functions to work with 1 or 0 as well as '1' or '0' (thanks @DesT)
 -- 2020.04.05  @rafale77, pull request #27, scene controller LED handling (Leviton 4-button)
--- 2020.05.11  stop disabling devices in room 101 (they stayed that way when restored!  Thanks @)
--- 2020.05.12  add updater for CC #1 (dumb switch / scene controller)
+-- 2020.05.11  don't disable devices in Room101 (because they weren't enabled when restored.  Thanks @kfxo)
+--             see: https://smarthome.community/topic/111/all-z-way-devices-disabled-attribute-is-set-to-1
+-- 2020.05.12  add command class 1 updater for ZWave.me battery switch, thanks @ArcherS
+--             see: https://smarthome.community/topic/113/changing-device-type-for-wall-controller
+-- 2020.07.12  add CC 91, Central Scene for Remotec ZRC90 (and others?)
+--             see: https://smarthome.community/topic/171/remotec-zrc90
 
 
 local json    = require "openLuup.json"
@@ -850,7 +850,7 @@ end
 --
 
 local CC = {   -- command class object
-
+ 
   -- scene controller, also used for CC ["1"]
   ["0"] = {
     updater = function (d, inst, meta)
@@ -1110,7 +1110,26 @@ local CC = {   -- command class object
 
   files = {nil, SID.HVAC_FanOperatingMode},
   },
+  
+  --central scene
+  ["91"] = {
+    updater = function (d, inst, meta)
+      local dev = luup.devices[d]
+      local click = inst.updateTime
+      if click ~= meta.click then -- force variable updates
+        local scene = meta.scale
+        local time  = os.time()
 
+        luup.variable_set (SID.SceneController, "sl_CentralSceneUpdates", scene, d)
+        luup.variable_set (SID.SceneController, "LastSceneTime",time, d)
+
+        meta.click = click
+      end
+    end,
+
+    files = { DEV.controller, SID.SceneController },
+  },
+  
   -- door lock
   ["98"] = {
     updater = function (d, inst)
@@ -1452,6 +1471,10 @@ local function configureDevice (id, name, ldv, child)
     upnp_file = v.meta.upnp_file
     name = v.metrics.title
     -- updaters are set at the end of this if-then-elseif statement
+
+  elseif classes["91"] and #classes["91"] == 1 then           -- central scene
+    local v = classes["91"][1]
+    upnp_file, json_file, name = add_updater (v)
 
   elseif classes["102"] and #classes["102"] == 1 then         -- door lock (barrier)
     local v = classes["102"][1]
