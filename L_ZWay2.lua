@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 ABOUT = {
   NAME          = "L_ZWay2",
-  VERSION       = "2020.07.12",
+  VERSION       = "2020.07.14",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2020 AKBooer",
@@ -1114,15 +1114,12 @@ local CC = {   -- command class object
   --central scene
   ["91"] = {
     updater = function (d, inst, meta)
-      local dev = luup.devices[d]
       local click = inst.updateTime
       if click ~= meta.click then -- force variable updates
-        local scene = meta.scale
+        local button = inst.metrics.level
         local time  = os.time()
-
-        luup.variable_set (SID.SceneController, "sl_CentralSceneUpdates", scene, d)
+        luup.variable_set (SID.SceneController, "sl_CentralScene", button, d)
         luup.variable_set (SID.SceneController, "LastSceneTime",time, d)
-
         meta.click = click
       end
     end,
