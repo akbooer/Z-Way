@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 ABOUT = {
   NAME          = "L_ZWay2",
-  VERSION       = "2020.07.14",
+  VERSION       = "2020.11.24",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2020 AKBooer",
@@ -57,11 +57,13 @@ ABOUT = {
 --             see: https://smarthome.community/topic/113/changing-device-type-for-wall-controller
 -- 2020.07.12  add CC 91, Central Scene for Remotec ZRC90 (and others?)
 --             see: https://smarthome.community/topic/171/remotec-zrc90
+-- 2020.11.24  add category_num, if not set already, when checking devices
 
 
 local json    = require "openLuup.json"
 local chdev   = require "openLuup.chdev"      -- NOT the same as the luup.chdev module! (special create fct)
 local async   = require "openLuup.http_async"
+local loader  = require "openLuup.loader"
 local http    = require "socket.http"
 local ltn12   = require "ltn12"
 
@@ -1583,7 +1585,15 @@ local function createChildren (bridgeDevNo, vDevs, room, OFFSET)
       dev = createZwaveDevice (parent, id, name, altid, upnp_file, json_file, room)
     end
     dev.handle_children = true                              -- ensure that any child devices are handled
-    dev.attributes.host = "Z-Way"                           -- flag as Z-Way hosted device [+luup.variable_set()]
+    local attr = dev.attributes
+    -- 2020.11.24 add category num, if not set already
+    local dt = attr.device_type
+    local cn = attr.category_num or 0
+    if cn == 0 then
+      attr.category_num = loader.cat_by_dev[dt] or 0
+    end
+    --
+    attr.host = "Z-Way"                           -- flag as Z-Way hosted device [+luup.variable_set()]
     if CLONEROOMS then dev: rename (nil, room) end          -- force to given room name
     if dev.room_num == 101 then dev: rename (nil, room) end -- ensure it's not in Room 101!!
     list[#list+1] = id   -- add to new list
