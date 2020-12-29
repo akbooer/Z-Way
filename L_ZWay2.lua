@@ -518,6 +518,17 @@ SRV.HaDevice = {
       Z.zwcommand(id, inst, cc, cmd)
     end,
 
+    GetConfig = function (d,args)
+      local cc = 112
+      local par = args.parameter
+      local data = "Get(%s)"
+      data = data: format(par)
+      local altid = luup.devices[d].id
+      local id, inst = altid: match (NIaltid)
+      status, response = Z.zwcommand(id, inst, cc, data)
+      return response
+    end,	
+	
     SendConfig = function (d,args)
       local cc = 112
       local par,cmd,sz = args.parameter, args.command, args.size or 0
