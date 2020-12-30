@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 ABOUT = {
   NAME          = "L_ZWay2",
-  VERSION       = "2020.11.24",
+  VERSION       = "2020.11.30",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2020 AKBooer",
@@ -58,6 +58,7 @@ ABOUT = {
 -- 2020.07.12  add CC 91, Central Scene for Remotec ZRC90 (and others?)
 --             see: https://smarthome.community/topic/171/remotec-zrc90
 -- 2020.11.24  add category_num, if not set already, when checking devices
+-- 2020.12.30  add Zwave GetConfig function
 
 
 local json    = require "openLuup.json"
@@ -152,36 +153,32 @@ local function ZWayAPI (ip, sid)
   -- send a command
   local function command (id, cmd)
     local url = "http://%s:8083/ZAutomation/api/v1/devices/ZWayVDev_zway_%s/command/%s"
-    local request = url: format (ip, id, cmd)
-    return HTTP_request_json (request)
+    return HTTP_request_json (url: format (ip, id, cmd))
   end
 
   -- send a zwave command
   local function zwcommand (id, inst, cc, cmd)
     local url = "http://%s:8083/ZWaveAPI/Run/devices[%s].instances[%s].commandClasses[%s].%s"
-    local request = url: format (ip, id, inst, cc, cmd)
-    return HTTP_request_json (request)
+    s, d = HTTP_request_json (url: format (ip, id, inst, cc, cmd))
+    return d
   end
 
   -- send a data packet
   local function zwsend (id, data)
     local url = "http://%s:8083/ZWaveAPI/Run/SendData(%s,%s)"
-    local request = url: format (ip, id, data)
-    return HTTP_request_json (request)
+    return HTTP_request_json (url: format (ip, id, data))
   end
 
   -- send a generic request
   local function request (req)
     local url = "http://%s:8083%s"
-    local request = url: format (ip, req)
-    return HTTP_request (request)
+    return HTTP_request (url: format (ip, req))
   end
 
   -- send a generic ASYNC request
   local function async_request (req, callback)
     local url = "http://%s:8083%s"
-    local request = url: format (ip, req)
-    return HTTP_async_request (request, callback)
+    return HTTP_async_request (url: format (ip, req), callback)
   end
 
   -- return status
@@ -210,7 +207,7 @@ local function ZWayAPI (ip, sid)
         end,
         command = zwcommand,
         send = zwsend,
-        
+
       },
 
     -- Virtual Device API
@@ -403,9 +400,9 @@ end
 -- return "1"  or "0"   or "on" or "off"
 local function on_or_off (x)
   local y = {
-    ["on"] = "1", ["off"] = "0", 
-    ["1"] = "on", ["0"] = "off", 
-    [1] = "on", [0] = "off", 
+    ["on"] = "1", ["off"] = "0",
+    ["1"] = "on", ["0"] = "off",
+    [1] = "on", [0] = "off",
     [true] = "on"}
   local z = tonumber (x)
   local on = z and z > 0
@@ -414,7 +411,7 @@ end
 
 local function open_or_close (x)
   local y = {
-    ["open"] = "0", ["close"] = "1", 
+    ["open"] = "0", ["close"] = "1",
     ["0"] = "open", ["1"] = "close",
     [0] = "open", [1] = "close"}
   return y[x] or x
@@ -422,7 +419,7 @@ end
 
 local function rev_open_or_close (x)
   local y = {
-    ["open"] = "1", ["close"] = "0", 
+    ["open"] = "1", ["close"] = "0",
     ["1"] = "open", ["0"] = "close",
     [1] = "open", [0] = "close"}
   return y[x] or x
@@ -525,6 +522,19 @@ SRV.HaDevice = {
       local id, inst = altid: match (NIaltid)
       Z.zwcommand(id, inst, cc, cmd)
     end,
+
+    GetConfig = {
+      run = function (d,args)
+        local cc = 112
+        local par = args.parameter
+        local data = "data[%s].val.value"
+        local altid = luup.devices[d].id
+        local id, inst = altid: match (NIaltid)
+        data = data: format(par)
+        conf = Z.zwcommand(id, inst, cc, data)
+      end,
+      extra_returns = {Config = function () return conf end}
+    },
 
     SendConfig = function (d,args)
       local cc = 112
@@ -632,23 +642,23 @@ SRV.SceneControllerLED = {
 -- newValue = 0,1,2 or 3 where 0=off, 1=green, 2=red, 3=orange (red and green)
 -- Indicator = 1-4, or 5 to set all to same colour
 -- LightSettings bits are arranged as: MSB RRRRGGGG LSB
---                                         43214321 corresponding button number 
+--                                         43214321 corresponding button number
 -- 2020.04.05  thanks to @rafale77 for explaining how this works!
   SetLight = function (d, args)
     local curled = luup.variable_get(SID.SceneControllerLED, "LightSettings", d) or 0
-    
+
     local curbit = num2bits (curled, 8)               -- extract 8 LSBs
     local colbit = num2bits (args.newValue, 2)        -- extract 2 LSBs
     local indicator = tonumber(args.Indicator)
-    
+
     for _, lamp in ipairs (indicator==5 and {1,2,3,4} or {indicator}) do
       curbit[lamp] = colbit[1]                -- green LED
       curbit[lamp + 4] = colbit[2]            -- red LED
     end
-    
+
     local led = bits2num(curbit)
     luup.variable_set(SID.SceneControllerLED, "LightSettings", led, d)
-    
+
     local altid = luup.devices[d].id
     local id = altid: match (NIaltid)
     local cc = 145     --command class
@@ -852,7 +862,7 @@ end
 --
 
 local CC = {   -- command class object
- 
+
   -- scene controller, also used for CC ["1"]
   ["0"] = {
     updater = function (d, inst, meta)
@@ -881,7 +891,7 @@ local CC = {   -- command class object
 
     files = { nil, SID.HaDevice },    -- device, service, json files
   },
-  
+
   -- dumb switch, like ZWave.me battery switch
   ["1"] = {
     updater = function () end,      -- dummy stub to be assigned at end of CC table
@@ -1112,7 +1122,7 @@ local CC = {   -- command class object
 
   files = {nil, SID.HVAC_FanOperatingMode},
   },
-  
+
   --central scene
   ["91"] = {
     updater = function (d, inst, meta)
@@ -1128,7 +1138,7 @@ local CC = {   -- command class object
 
     files = { DEV.controller, SID.SceneController },
   },
-  
+
   -- door lock
   ["98"] = {
     updater = function (d, inst)
