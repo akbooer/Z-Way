@@ -60,6 +60,7 @@ ABOUT = {
 -- 2020.11.24  add category_num, if not set already, when checking devices
 
 -- 2021.01.19  flag authorisation failure during synchronous or asynchronous requests (thanks @PerH)
+-- 2021.02.09  Add GetConfig action to poll device and report back configuration settings
 
 
 local json    = require "openLuup.json"
@@ -532,6 +533,22 @@ SRV.HaDevice = {
       local id, inst = altid: match (NIaltid)
       Z.zwcommand(id, inst, cc, cmd)
     end,
+	
+    GetConfig = {
+      run = function (d,args)
+        local cc = 112
+        local par = args.parameter
+        local data = "Get(%s)"
+        local data2 = "data[%s].val.value"
+        local altid = luup.devices[d].id
+        local id, inst = altid: match (NIaltid)
+        data = data: format(par)
+        data2 = data2: format(par)
+        Z.zwcommand(id, inst, cc, data)
+        ret, conf = Z.zwcommand(id, inst, cc, data2)
+      end,
+      extra_returns = {Config = function () return conf end}
+    },
 
     SendConfig = function (d,args)
       local cc = 112
@@ -543,13 +560,6 @@ SRV.HaDevice = {
       Z.zwcommand(id, inst, cc, data)
     end,
     
-    GetConfig = {
-      run = function() 
-        -- do whatever you need to get the status into ZWay_ZWaveCONFIG
-        ZWay_ZWaveCONFIG = 42 
-      end,
-      extra_returns = {Config = function () return ZWay_ZWaveCONFIG end}
-    },
   }
 
 
