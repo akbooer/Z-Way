@@ -2,7 +2,7 @@ module (..., package.seeall)
 
 ABOUT = {
   NAME          = "L_ZWay2",
-  VERSION       = "2021.01.19",
+  VERSION       = "2021.07.24",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
   COPYRIGHT     = "(c) 2013-2021 AKBooer",
@@ -61,7 +61,7 @@ ABOUT = {
 
 -- 2021.01.19  flag authorisation failure during synchronous or asynchronous requests (thanks @PerH)
 -- 2021.02.09  Add GetConfig action to poll device and report back configuration settings
-
+-- 2021.07.24  Add support for Fibaro TRV heater device as a thermostat
 
 local json    = require "openLuup.json"
 local chdev   = require "openLuup.chdev"      -- NOT the same as the luup.chdev module! (special create fct)
@@ -1466,6 +1466,10 @@ local function configureDevice (id, name, ldv, child)
     local temp = classes["49"]
     add_updater(temp[1])
 
+  elseif classes["64"] and classes["67"] then    -- a fibaro heater with temperature in another instance
+    upnp_file, json_file, name = add_updater (classes["64"][1])
+    upnp_file, json_file, name = add_updater (classes["67"][1])		
+		
   elseif ((classes["37"] and #classes["37"] == 1)             -- ... just one switch
   or      (classes["38"] and #classes["38"] == 1) ) then         -- ... OR just one dimmer
     -- @rafale77, pull request #17 was for DesT’s GE combo device
