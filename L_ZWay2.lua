@@ -2,14 +2,14 @@ module (..., package.seeall)
 
 ABOUT = {
   NAME          = "L_ZWay2",
-  VERSION       = "2021.07.24",
+  VERSION       = "2024.02.22",
   DESCRIPTION   = "Z-Way interface for openLuup",
   AUTHOR        = "@akbooer",
-  COPYRIGHT     = "(c) 2013-2021 AKBooer",
+  COPYRIGHT     = "(c) 2013-2024 AKBooer",
   DOCUMENTATION = "https://community.getvera.com/t/openluup-zway-plugin-for-zwave-me-hardware/193746",
   DEBUG         = false,
   LICENSE       = [[
-  Copyright 2013-2021 AK Booer
+  Copyright 2013-2024 AK Booer
 
   Licensed under the Apache License, Version 2.0 (the "License");
   you may not use this file except in compliance with the License.
@@ -61,7 +61,10 @@ ABOUT = {
 
 -- 2021.01.19  flag authorisation failure during synchronous or asynchronous requests (thanks @PerH)
 -- 2021.02.09  Add GetConfig action to poll device and report back configuration settings
--- 2021.07.24  Add support for Fibaro TRV heater device as a thermostat
+-- 2021.07.24  @rafale77, pull request #31, add support for Fibaro TRV heater device as a thermostat
+
+-- 2024.02.22  put devices data into global environment to allow external access (room/device nremae for @DesT)
+
 
 local json    = require "openLuup.json"
 local chdev   = require "openLuup.chdev"      -- NOT the same as the luup.chdev module! (special create fct)
@@ -87,6 +90,8 @@ end
 --
 -- Z-WayVDev() API
 --
+
+_G["DEVS"] = {"empty"}   -- 2024.02.22  global device table access
 
 
 local function ZWayAPI (ip, sid)
@@ -1703,6 +1708,7 @@ local D = {}    -- latest device structure
 
 ---- this needs to be as fast as possible, since all vDevs are cycled through every update
 local function updateChildren (vDevs)
+  DEVS = vDevs          -- 2024.02.22  allow global access for scripting
   local sid = SID.ZWay
   local failed = {}
   for _,inst in pairs (vDevs) do
